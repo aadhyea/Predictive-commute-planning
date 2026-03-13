@@ -1,0 +1,55 @@
+# Core dependencies
+python-dotenv==1.0.0
+pydantic==2.5.0
+pydantic-settings==2.1.0
+
+# Agent framework
+anthropic==0.18.1
+google-genai>=1.0.0
+langchain==0.1.20
+langgraph==0.0.40
+
+# HTTP client for MCP (using httpx for async support)
+httpx==0.26.0
+
+# Database (Supabase)
+supabase==2.3.4
+psycopg2-binary==2.9.9
+pgvector==0.2.4
+
+# Auth (implement in final stages)
+auth0-python==4.7.1
+python-jose[cryptography]==3.3.0
+
+# APIs
+requests==2.31.0
+googlemaps==4.10.0
+
+# Data processing
+pandas==2.1.4
+numpy==1.26.3
+geopy==2.4.1
+
+# Scheduling & Background tasks
+APScheduler==3.10.4
+
+# UI
+streamlit==1.29.0
+plotly==5.18.0
+folium==0.15.1
+streamlit-folium==0.15.1
+
+# QR code generation
+qrcode[pil]>=7.4.2
+
+# Utilities
+python-dateutil==2.8.2
+pytz==2023.3
+
+# Testing
+pytest==7.4.3
+pytest-asyncio==0.23.3
+
+# Development
+black==23.12.1
+flake8==7.0.0

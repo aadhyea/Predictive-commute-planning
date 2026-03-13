@@ -1,0 +1,5 @@
+.env
+__pycache__/
+tests/
+test_claude.py
+test_mcp_connection.py
