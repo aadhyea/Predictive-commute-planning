@@ -3,3 +3,6 @@ __pycache__/
 tests/
 test_claude.py
 test_mcp_connection.py
+DMRC-GTFS/
+GTFS/
+
