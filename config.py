@@ -30,19 +30,11 @@ class Settings(BaseSettings):
     )
     
     # ============================================
-    # SMITHERY MCP SERVER (Google Maps)
+    # GOOGLE MAPS
     # ============================================
-    MCP_GOOGLE_MAPS_ENABLED: bool = Field(
+    GOOGLE_MAPS_ENABLED: bool = Field(
         True,
-        description="Enable Smithery Google Maps MCP Server"
-    )
-    MCP_GOOGLE_MAPS_URL: str = Field(
-        "https://server.smithery.ai/@smithery-ai/google-maps",
-        description="Smithery Google Maps MCP Server URL"
-    )
-    SMITHERY_API_KEY: Optional[str] = Field(
-        None,
-        description="Smithery platform API key for authenticated MCP access"
+        description="Enable Google Maps SDK client"
     )
     
     # ============================================
@@ -71,8 +63,10 @@ class Settings(BaseSettings):
     
     @validator("DELHI_METRO_DATA_DIR", pre=True)
     def ensure_metro_data_dir_exists(cls, v):
-        """Ensure Delhi Metro data directory exists"""
-        path = Path(v)
+        """Ensure Delhi Metro data directory exists, resolving relative paths from project root"""
+        path = Path(v) if not isinstance(v, Path) else v
+        if not path.is_absolute():
+            path = PROJECT_ROOT / path
         path.mkdir(parents=True, exist_ok=True)
         return path
     
@@ -202,9 +196,9 @@ def is_auth_enabled() -> bool:
     )
 
 
-def is_mcp_enabled() -> bool:
-    """Check if MCP connectors are enabled"""
-    return settings.MCP_GOOGLE_MAPS_ENABLED
+def is_google_maps_enabled() -> bool:
+    """Check if Google Maps client is enabled"""
+    return settings.GOOGLE_MAPS_ENABLED
 
 
 def get_data_path(filename: str) -> Path:

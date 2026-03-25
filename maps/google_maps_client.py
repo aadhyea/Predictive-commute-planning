@@ -1,9 +1,6 @@
 """
 Google Maps client using the official googlemaps Python SDK.
 
-Maintains the same async interface as the original Smithery MCP client
-so no other files need to change.
-
 Install:  pip install googlemaps
 """
 
@@ -20,11 +17,12 @@ from config import settings
 logger = logging.getLogger(__name__)
 
 
-class SmitheryGoogleMapsMCP:
+class GoogleMapsClient:
     """
     Google Maps wrapper using the official SDK.
     All methods are async (sync SDK calls are run in a thread-pool executor).
     """
+
 
     def __init__(self):
         self._gmaps = googlemaps.Client(key=settings.GOOGLE_MAPS_API_KEY)
@@ -171,16 +169,29 @@ class SmitheryGoogleMapsMCP:
             if result:
                 loc = result[0]
                 return {
-                    "lat":               loc["geometry"]["location"]["lat"],
-                    "lng":               loc["geometry"]["location"]["lng"],
-                    "formatted_address": loc["formatted_address"],
-                    "place_id":          loc.get("place_id"),
-                    "types":             loc.get("types", []),
+                    "lat":                loc["geometry"]["location"]["lat"],
+                    "lng":                loc["geometry"]["location"]["lng"],
+                    "formatted_address":  loc["formatted_address"],
+                    "place_id":           loc.get("place_id"),
+                    "types":              loc.get("types", []),
+                    "address_components": loc.get("address_components", []),
                 }
             return None
         except Exception as e:
             logger.error(f"geocode failed: {e}")
             return None
+
+    async def detect_city(self, address: str) -> str:
+        """Returns city name from address string. Falls back to 'unknown'."""
+        result = await self.geocode(address)
+        if not result:
+            return "unknown"
+        for component in result.get("address_components", []):
+            if "locality" in component["types"]:
+                return component["long_name"]
+            if "administrative_area_level_2" in component["types"]:
+                return component["long_name"]
+        return "unknown"
 
     async def reverse_geocode(self, lat: float, lng: float) -> Optional[str]:
         """Convert coordinates to a formatted address string."""
@@ -233,6 +244,35 @@ class SmitheryGoogleMapsMCP:
     # ============================================
     # PLACES
     # ============================================
+
+    async def autocomplete_places(
+        self,
+        query: str,
+        lat: Optional[float] = None,
+        lng: Optional[float] = None,
+        radius: Optional[int] = None,
+    ) -> List[str]:
+        """
+        Return up to 5 place name suggestions for the given partial query.
+        Restricted to India. Pass lat/lng/radius to bias results to a city.
+        """
+        if not query or len(query) < 2:
+            return []
+        try:
+            kwargs: Dict[str, Any] = {"components": {"country": "in"}}
+            if lat is not None and lng is not None:
+                kwargs["location"] = (lat, lng)
+                kwargs["radius"] = radius or 40000
+                kwargs["strict_bounds"] = False   # bias not hard-filter
+            results = await self._run(
+                self._gmaps.places_autocomplete,
+                query,
+                **kwargs,
+            )
+            return [r["description"] for r in (results or [])][:5]
+        except Exception as e:
+            logger.error(f"autocomplete_places failed: {e}")
+            return []
 
     async def search_places(
         self,
@@ -294,4 +334,4 @@ class SmitheryGoogleMapsMCP:
 
 
 # Singleton — import this everywhere
-mcp_maps = SmitheryGoogleMapsMCP()
+maps_client = GoogleMapsClient()

@@ -13,7 +13,7 @@ from typing import Any, Dict
 
 from google.genai import types
 
-from mcp.google_maps_client import mcp_maps
+from maps.google_maps_client import maps_client
 from services.metro_service import delhi_metro
 from services.weather_service import weather_service
 from services.hybrid_route_service import hybrid_route_service
@@ -62,6 +62,7 @@ GEMINI_TOOLS = [
                     "destination": S(type=T.STRING, description="Ending location, e.g. 'Cyber City, Gurugram'"),
                     "departure_time_iso": S(type=T.STRING, description="Planned departure time in ISO 8601 format. Defaults to now if omitted."),
                     "required_arrival_iso": S(type=T.STRING, description="Required arrival time in ISO 8601 format. Used to flag routes that arrive too late."),
+                    "city": S(type=T.STRING, description="City name auto-populated from geocoding, e.g. 'Delhi', 'Mumbai', 'Bengaluru'. Used to select the correct routing strategy."),
                 },
                 required=["origin", "destination"],
             ),
@@ -218,6 +219,7 @@ async def _get_route_options(inp: Dict) -> Dict:
         destination=      inp["destination"],
         departure_time=   departure,
         required_arrival= required,
+        city_override=    inp.get("city"),
     )
 
     return {
@@ -227,7 +229,7 @@ async def _get_route_options(inp: Dict) -> Dict:
 
 
 async def _get_traffic_conditions(inp: Dict) -> Dict:
-    traffic = await mcp_maps.get_traffic_conditions(
+    traffic = await maps_client.get_traffic_conditions(
         origin=      inp["origin"],
         destination= inp["destination"],
         mode=        "driving",
@@ -273,7 +275,7 @@ def _get_metro_status(inp: Dict) -> Dict:
 
 async def _find_nearest_metro(inp: Dict) -> Dict:
     location = inp["location"]
-    geo      = await mcp_maps.geocode(location)
+    geo      = await maps_client.geocode(location)
 
     if not geo:
         return {"error": f"Could not geocode '{location}'"}

@@ -117,15 +117,15 @@ def test_supabase():
 
 
 # ============================================================
-# 4. MCP / GOOGLE MAPS
+# 4. GOOGLE MAPS
 # ============================================================
 
-async def test_mcp():
-    print("\n--- 4. Smithery MCP / Google Maps ---")
+async def test_maps():
+    print("\n--- 4. Google Maps ---")
     try:
-        from mcp.google_maps_client import mcp_maps
+        from maps.google_maps_client import maps_client
 
-        result = await mcp_maps.geocode("India Gate, New Delhi")
+        result = await maps_client.geocode("India Gate, New Delhi")
         if result:
             print(f"  {PASS} Geocode OK: {result.get('formatted_address')}")
             print(f"       Coords: ({result.get('lat'):.4f}, {result.get('lng'):.4f})")
@@ -133,7 +133,7 @@ async def test_mcp():
             print(f"  {FAIL} Geocode returned no result")
             return False
 
-        routes = await mcp_maps.get_directions(
+        routes = await maps_client.get_directions(
             origin="Rajiv Chowk Metro Station, Delhi",
             destination="Cyber City, Gurugram",
             mode="transit",
@@ -147,13 +147,13 @@ async def test_mcp():
 
         return True
     except Exception as e:
-        print(f"  {FAIL} MCP error: {e}")
+        print(f"  {FAIL} Google Maps error: {e}")
         traceback.print_exc()
         return False
     finally:
         try:
-            from mcp.google_maps_client import mcp_maps
-            await mcp_maps.close()
+            from maps.google_maps_client import maps_client
+            await maps_client.close()
         except Exception:
             pass
 
@@ -171,7 +171,7 @@ async def main():
         "Config":        test_config(),
         "Metro Service": test_metro_service(),
         "Supabase":      test_supabase(),
-        "MCP/Maps":      await test_mcp(),
+        "Google Maps":   await test_maps(),
     }
 
     print("\n" + "=" * 55)
