@@ -474,3 +474,70 @@ class DelhiMetroService:
 
 # Singleton – import this in other modules
 delhi_metro = DelhiMetroService()
+
+
+# ============================================
+# CITY-AGNOSTIC METRO FINDER
+# ============================================
+
+DELHI_ALIASES = {
+    "delhi", "new delhi", "delhi ncr", "delhi / ncr",
+    "new delhi municipal council", "central delhi", "south delhi",
+    "north delhi", "east delhi", "west delhi", "gurugram", "gurgaon",
+    "noida", "faridabad", "ghaziabad",
+}
+
+
+def _is_delhi(city: str) -> bool:
+    """Return True if city string maps to Delhi/NCR."""
+    normalized = city.lower().strip()
+    # Direct match
+    if normalized in DELHI_ALIASES:
+        return True
+    # Starts-with match catches "Delhi Cantonment" etc.
+    return normalized.startswith("delhi") or normalized.startswith("new delhi")
+
+
+async def find_nearest_metro_any_city(city: str, lat: float, lng: float) -> dict | None:
+    """
+    Delhi/NCR → uses GTFS (fast, precise).
+    Any other city → uses Google Maps Places search (city-agnostic).
+    Returns: {"name": str, "lat": float, "lng": float, "distance_km": float}
+    """
+    if _is_delhi(city):
+        station = delhi_metro.find_nearest_station(lat, lng)
+        if station:
+            dist_km = geodesic((lat, lng), (station.lat, station.lng)).km
+            return {
+                "name":        station.name,
+                "lat":         station.lat,
+                "lng":         station.lng,
+                "distance_km": round(dist_km, 3),
+                "line":        station.line,
+            }
+        return None
+
+    # Non-Delhi: Places Text Search for nearby metro/rapid-transit station.
+    # Sort by actual distance (Places relevance order ≠ nearest).
+    from maps.google_maps_client import maps_client
+    places = await maps_client.search_places(
+        "metro station", location=f"{lat},{lng}", radius=10000
+    )
+    if not places:
+        return None
+
+    # Pick the genuinely closest result, not just the first one
+    candidates = [
+        (geodesic((lat, lng), (p["lat"], p["lng"])).km, p)
+        for p in places
+    ]
+    candidates.sort(key=lambda x: x[0])
+    dist_km, nearest = candidates[0]
+
+    return {
+        "name":        nearest["name"],
+        "lat":         nearest["lat"],
+        "lng":         nearest["lng"],
+        "distance_km": round(dist_km, 3),
+        "line":        None,
+    }

@@ -20,6 +20,7 @@ import folium
 import googlemaps.convert
 import streamlit as st
 from streamlit_folium import st_folium
+from streamlit_searchbox import st_searchbox
 
 # ── Page config (must be first Streamlit call) ──────────────────────────────
 st.set_page_config(
@@ -108,8 +109,8 @@ def get_agent():
 
 @st.cache_resource(show_spinner=False)
 def get_maps_client():
-    from mcp.google_maps_client import mcp_maps
-    return mcp_maps
+    from maps.google_maps_client import maps_client
+    return maps_client
 
 
 # ── Formatting helpers ───────────────────────────────────────────────────────
@@ -126,6 +127,47 @@ def fmt_duration(mins: int) -> str:
         return f"{mins} min"
     h, m = divmod(mins, 60)
     return f"{h}h {m}m" if m else f"{h}h"
+
+
+# City centre coords for autocomplete location bias (lat, lng, radius_m)
+_CITY_COORDS = {
+    "Delhi / NCR":  (28.6139, 77.2090, 60000),
+    "Mumbai":       (19.0760, 72.8777, 45000),
+    "Bengaluru":    (12.9716, 77.5946, 45000),
+    "Chennai":      (13.0827, 80.2707, 40000),
+    "Hyderabad":    (17.3850, 78.4867, 45000),
+    "Kolkata":      (22.5726, 88.3639, 40000),
+    "Pune":         (18.5204, 73.8567, 40000),
+    "Ahmedabad":    (23.0225, 72.5714, 40000),
+}
+
+
+def search_places_autocomplete(query: str) -> list:
+    """Sync wrapper for Google Places Autocomplete — used by st_searchbox.
+    Biases results to the city selected in the sidebar."""
+    if not query or len(query) < 2:
+        return []
+    try:
+        city = st.session_state.get("city_override", "Auto-detect")
+        coords = _CITY_COORDS.get(city)
+        if coords:
+            lat, lng, radius = coords
+            return run_async(get_maps_client().autocomplete_places(query, lat=lat, lng=lng, radius=radius))
+        return run_async(get_maps_client().autocomplete_places(query))
+    except Exception:
+        return []
+
+
+def extract_city_from_geo(geo: dict) -> str:
+    """Extract city name from geocode result address_components."""
+    if not geo:
+        return "unknown"
+    for comp in geo.get("address_components", []):
+        if "locality" in comp["types"]:
+            return comp["long_name"]
+        if "administrative_area_level_2" in comp["types"]:
+            return comp["long_name"]
+    return "unknown"
 
 
 # ── Map builder ──────────────────────────────────────────────────────────────
@@ -301,21 +343,45 @@ with st.sidebar:
     )
 
     st.divider()
+    st.markdown("### 🌆 City")
+    CITY_OPTIONS = [
+        "Auto-detect", "Delhi / NCR", "Mumbai", "Bengaluru",
+        "Chennai", "Hyderabad", "Kolkata", "Pune", "Ahmedabad",
+    ]
+    city_override = st.selectbox(
+        "City (overrides auto-detect)",
+        options=CITY_OPTIONS,
+        index=0,
+        help="Auto-detect reads the city from your origin address. Override if detection is wrong.",
+    )
+    # Persist so it survives reruns without being inside the form
+    st.session_state["city_override"] = city_override
+
+    st.divider()
     st.markdown("### 📍 Quick Fill")
-    if st.button("🏠 Home → Office (Demo)", use_container_width=True):
-        st.session_state["origin_input"]      = "Rajiv Chowk Metro Station, Delhi"
-        st.session_state["destination_input"] = "Cyber City, Gurugram"
-    if st.button("📍 CP → Noida (Demo)", use_container_width=True):
-        st.session_state["origin_input"]      = "Connaught Place, New Delhi"
-        st.session_state["destination_input"] = "Noida Sector 62, Uttar Pradesh"
+    def _quick_fill(origin: str, dest: str):
+        st.session_state["origin_input"]      = origin
+        st.session_state["destination_input"] = dest
+        # Clear searchbox internal state so they re-render with new defaults
+        st.session_state.pop("origin_searchbox", None)
+        st.session_state.pop("dest_searchbox", None)
+
+    if st.button("🏠 Delhi: Rajiv Chowk → Cyber City", use_container_width=True):
+        _quick_fill("Rajiv Chowk Metro Station, Delhi", "Cyber City, Gurugram")
+    if st.button("📍 Delhi: CP → Noida Sector 62", use_container_width=True):
+        _quick_fill("Connaught Place, New Delhi", "Noida Sector 62, Uttar Pradesh")
+    if st.button("✈️ Bangalore: Indiranagar → Whitefield", use_container_width=True):
+        _quick_fill("Indiranagar, Bengaluru", "Whitefield, Bengaluru")
+    if st.button("🌊 Mumbai: Andheri → Bandra Kurla Complex", use_container_width=True):
+        _quick_fill("Andheri Station, Mumbai", "Bandra Kurla Complex, Mumbai")
 
     st.divider()
     st.caption("Delhi Commute Agent · Powered by Gemini 2.5 Flash")
 
 
 # ── HEADER ────────────────────────────────────────────────────────────────────
-st.markdown("# 🚇 Delhi Commute Agent")
-st.markdown("*AI-powered commute planning for Delhi Metro commuters — real-time routes, weather, and smart timing*")
+st.markdown("# 🚇 India Commute Agent")
+st.markdown("*AI-powered commute planning across Indian cities — real-time routes, weather, and smart timing*")
 st.divider()
 
 
@@ -328,23 +394,29 @@ tab_plan, tab_chat = st.tabs(["🗺️  Plan Commute", "💬  Chat with Agent"])
 # ══════════════════════════════════════════════════════════════════════════════
 with tab_plan:
 
-    # ── Input form ────────────────────────────────────────────────────────────
+    # ── Origin / Destination searchboxes (must be outside st.form for autocomplete) ──
+    col_o, col_d = st.columns(2)
+    with col_o:
+        st.markdown("**🏠 From**")
+        origin = st_searchbox(
+            search_places_autocomplete,
+            placeholder="Start typing your origin…",
+            default=st.session_state.get("origin_input", "Rajiv Chowk Metro Station, Delhi"),
+            key="origin_searchbox",
+            clear_on_submit=False,
+        )
+    with col_d:
+        st.markdown("**🏢 To**")
+        destination = st_searchbox(
+            search_places_autocomplete,
+            placeholder="Start typing your destination…",
+            default=st.session_state.get("destination_input", "Cyber City, Gurugram"),
+            key="dest_searchbox",
+            clear_on_submit=False,
+        )
+
+    # ── Remaining inputs + submit (inside form to batch the submit action) ────
     with st.form("plan_form"):
-        col_o, col_d = st.columns(2)
-
-        with col_o:
-            origin = st.text_input(
-                "🏠 From",
-                value=st.session_state.get("origin_input", "Rajiv Chowk Metro Station, Delhi"),
-                placeholder="Home address or metro station",
-            )
-        with col_d:
-            destination = st.text_input(
-                "🏢 To",
-                value=st.session_state.get("destination_input", "Cyber City, Gurugram"),
-                placeholder="Office address or landmark",
-            )
-
         col_date, col_time, col_extra = st.columns([1, 1, 2])
 
         with col_date:
@@ -363,7 +435,10 @@ with tab_plan:
 
     # ── Run agent on submit ───────────────────────────────────────────────────
     if submitted:
-        if not origin.strip() or not destination.strip():
+        # st_searchbox returns None until user selects; fall back to session default
+        origin      = origin      or st.session_state.get("origin_input", "")
+        destination = destination or st.session_state.get("destination_input", "")
+        if not (origin or "").strip() or not (destination or "").strip():
             st.error("Please enter both origin and destination.")
         else:
             required_arrival = datetime.combine(travel_date, arrival_time).isoformat()
@@ -388,10 +463,16 @@ with tab_plan:
                     st.session_state["plan_result"]      = result
                     st.session_state["plan_origin"]      = origin
                     st.session_state["plan_destination"] = destination
-                    # Geocode once and cache for maps
+                    # Geocode once and cache for maps + city detection
                     o_geo, d_geo = geocode_endpoints(origin, destination)
                     st.session_state["plan_o_geo"] = o_geo
                     st.session_state["plan_d_geo"] = d_geo
+                    # Detect city from geocode result
+                    auto_city = extract_city_from_geo(o_geo)
+                    chosen_city = st.session_state.get("city_override", "Auto-detect")
+                    st.session_state["detected_city"] = (
+                        chosen_city if chosen_city != "Auto-detect" else auto_city
+                    )
                 except Exception as e:
                     st.error(f"Agent error: {e}")
                     st.session_state.pop("plan_result", None)
@@ -399,6 +480,13 @@ with tab_plan:
     # ── Display results ───────────────────────────────────────────────────────
     if result := st.session_state.get("plan_result"):
         st.divider()
+
+        # City detection banner
+        detected_city = st.session_state.get("detected_city", "unknown")
+        city_override_val = st.session_state.get("city_override", "Auto-detect")
+        if detected_city and detected_city != "unknown":
+            source_note = " (manually selected)" if city_override_val != "Auto-detect" else " (auto-detected)"
+            st.info(f"📍 **City: {detected_city}**{source_note} · Routing strategy selected accordingly. Wrong city? Change it in the sidebar.", icon=None)
 
         # Row 1: Weather | Leave-by | Urgency
         r1c1, r1c2, r1c3 = st.columns([2, 2, 1])
@@ -470,10 +558,11 @@ with tab_plan:
         if routes:
             tab_labels = []
             for i, r in enumerate(routes[:3]):
-                label = r.get("label", f"Route {i+1}")
-                dur   = fmt_duration(r.get("total_duration_minutes", 0))
-                cost  = r.get("total_cost_rupees", 0)
-                tab_labels.append(f"{'⭐ ' if i==0 else ''}{label}  ·  {dur}  ·  ₹{cost}")
+                label      = r.get("label", f"Route {i+1}")
+                dur        = fmt_duration(r.get("total_duration_minutes", 0))
+                cost       = r.get("total_cost_rupees", 0)
+                city_badge = f" [{r['city']}]" if r.get("city") and r["city"].lower() not in ("delhi", "new delhi", "unknown") else ""
+                tab_labels.append(f"{'⭐ ' if i==0 else ''}{label}{city_badge}  ·  {dur}  ·  ₹{cost}")
 
             o_geo = st.session_state.get("plan_o_geo")
             d_geo = st.session_state.get("plan_d_geo")

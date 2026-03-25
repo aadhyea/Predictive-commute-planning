@@ -18,8 +18,8 @@ from typing import Any, Dict, List, Optional
 from geopy.distance import geodesic
 
 from config import settings
-from mcp.google_maps_client import mcp_maps
-from services.metro_service import delhi_metro
+from maps.google_maps_client import maps_client
+from services.metro_service import delhi_metro, find_nearest_metro_any_city, _is_delhi
 from services.weather_service import weather_service
 
 logger = logging.getLogger(__name__)
@@ -92,6 +92,7 @@ class RouteOption:
     disruptions: List[str] = field(default_factory=list)
     notes: List[str] = field(default_factory=list)
     overview_polyline: str = ""     # encoded Google Maps polyline (transit routes only)
+    city: Optional[str] = None      # detected city for multi-city badge
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -110,6 +111,7 @@ class RouteOption:
             "disruptions":           self.disruptions,
             "notes":                 self.notes,
             "overview_polyline":     self.overview_polyline,
+            "city":                  self.city,
             "steps": [
                 {
                     "mode":            s.mode,
@@ -151,6 +153,7 @@ class HybridRouteService:
         departure_time: Optional[datetime] = None,
         required_arrival: Optional[datetime] = None,
         user_prefs: Optional[Dict[str, Any]] = None,
+        city_override: Optional[str] = None,
     ) -> List[RouteOption]:
         """
         Main entry point. Returns up to MAX_ROUTES_TO_COMPARE ranked options.
@@ -158,22 +161,28 @@ class HybridRouteService:
         departure_time = departure_time or datetime.now()
         user_prefs     = user_prefs or {}
 
-        # Fetch all data concurrently
         import asyncio
-        weather_task    = asyncio.create_task(weather_service.get_current_conditions())
-        gm_transit_task = asyncio.create_task(
-            mcp_maps.get_directions(origin, destination, mode="transit",
+
+        # Geocode origin first so we can pass its coordinates to the weather service
+        origin_geo = await maps_client.geocode(origin)
+        weather_lat = origin_geo["lat"] if origin_geo else None
+        weather_lon = origin_geo["lng"] if origin_geo else None
+
+        # Fetch remaining data concurrently (weather now uses origin coords, not Delhi default)
+        weather_task         = asyncio.create_task(
+            weather_service.get_current_conditions(lat=weather_lat, lon=weather_lon)
+        )
+        gm_transit_task      = asyncio.create_task(
+            maps_client.get_directions(origin, destination, mode="transit",
                                     departure_time=departure_time, alternatives=True)
         )
-        gm_drive_task   = asyncio.create_task(
-            mcp_maps.get_traffic_conditions(origin, destination, mode="driving")
+        gm_drive_task        = asyncio.create_task(
+            maps_client.get_traffic_conditions(origin, destination, mode="driving")
         )
-        origin_geo_task      = asyncio.create_task(mcp_maps.geocode(origin))
-        destination_geo_task = asyncio.create_task(mcp_maps.geocode(destination))
+        destination_geo_task = asyncio.create_task(maps_client.geocode(destination))
 
-        weather_data, gm_transit, gm_drive, origin_geo, dest_geo = await asyncio.gather(
-            weather_task, gm_transit_task, gm_drive_task,
-            origin_geo_task, destination_geo_task,
+        weather_data, gm_transit, gm_drive, dest_geo = await asyncio.gather(
+            weather_task, gm_transit_task, gm_drive_task, destination_geo_task,
         )
 
         commute_impact  = weather_data.get("commute_impact", {})
@@ -201,7 +210,7 @@ class HybridRouteService:
         # --- Option 3: Metro-first hybrid (walk to nearest station + metro + walk)
         if origin_geo and dest_geo:
             hybrid = await self._build_metro_hybrid(
-                origin_geo, dest_geo, departure_time, weather_risk
+                origin_geo, dest_geo, departure_time, weather_risk, city_override=city_override
             )
             if hybrid:
                 options.append(hybrid)
@@ -348,6 +357,7 @@ class HybridRouteService:
         dest_geo: Dict[str, Any],
         departure_time: datetime,
         weather_risk: float,
+        city_override: Optional[str] = None,
     ) -> Optional[RouteOption]:
         """
         First-mile → metro → last-mile.
@@ -360,14 +370,30 @@ class HybridRouteService:
             olat, olng = origin_geo["lat"], origin_geo["lng"]
             dlat, dlng = dest_geo["lat"],   dest_geo["lng"]
 
-            nearest_origin = delhi_metro.find_nearest_station(olat, olng)
-            nearest_dest   = delhi_metro.find_nearest_station(dlat, dlng)
+            # Use explicit override, or auto-detect from origin address_components
+            if city_override and city_override != "Auto-detect":
+                city = city_override
+            else:
+                city = "unknown"
+                for comp in origin_geo.get("address_components", []):
+                    if "locality" in comp["types"]:
+                        city = comp["long_name"]
+                        break
+                    if "administrative_area_level_2" in comp["types"]:
+                        city = comp["long_name"]
+
+            nearest_origin = await find_nearest_metro_any_city(city, olat, olng)
+            nearest_dest   = await find_nearest_metro_any_city(city, dlat, dlng)
 
             if not nearest_origin or not nearest_dest:
                 return None
 
-            first_km = geodesic((olat, olng), (nearest_origin.lat, nearest_origin.lng)).km
-            last_km  = geodesic((dlat, dlng), (nearest_dest.lat,   nearest_dest.lng)).km
+            # If both ends resolve to the same station, a metro leg adds no value
+            if nearest_origin["name"] == nearest_dest["name"]:
+                return None
+
+            first_km = nearest_origin["distance_km"]
+            last_km  = nearest_dest["distance_km"]
 
             # Skip if metro station is too far to be practical
             if first_km > MAX_FIRST_MILE_KM or last_km > MAX_FIRST_MILE_KM:
@@ -378,20 +404,23 @@ class HybridRouteService:
 
             first_step = self._mile_step(
                 first_km, weather_risk, is_peak, surge,
-                dest_name=nearest_origin.name, is_first=True,
+                dest_name=nearest_origin["name"], is_first=True,
             )
             last_step = self._mile_step(
                 last_km, weather_risk, is_peak, surge,
-                dest_name=nearest_dest.name, is_first=False,
+                dest_name=nearest_dest["name"], is_first=False,
             )
 
-            # Metro leg — use Google Maps for accuracy
-            metro_routes = await mcp_maps.get_directions(
-                origin=        nearest_origin.name,
-                destination=   nearest_dest.name,
+            # Metro leg — use coordinates for precision; no transit_mode filter so
+            # Namma Metro (Bangalore), Mumbai Metro etc. are not excluded by Google's
+            # "subway" classification.
+            origin_coord = f"{nearest_origin['lat']},{nearest_origin['lng']}"
+            dest_coord   = f"{nearest_dest['lat']},{nearest_dest['lng']}"
+            metro_routes = await maps_client.get_directions(
+                origin=        origin_coord,
+                destination=   dest_coord,
                 mode=          "transit",
                 departure_time=departure_time + timedelta(minutes=first_step.duration_minutes),
-                transit_mode=  ["subway"],
             )
 
             if not metro_routes:
@@ -404,13 +433,13 @@ class HybridRouteService:
 
             metro_step = RouteStep(
                 mode=          "metro",
-                instruction=   f"Metro: {nearest_origin.name} → {nearest_dest.name}",
+                instruction=   f"Metro: {nearest_origin['name']} → {nearest_dest['name']}",
                 duration_minutes=metro_dur,
                 distance_km=   metro_dist,
                 cost_rupees=   metro_cost,
-                line=          nearest_origin.line,
-                departure_stop=nearest_origin.name,
-                arrival_stop=  nearest_dest.name,
+                line=          nearest_origin.get("line"),
+                departure_stop=nearest_origin["name"],
+                arrival_stop=  nearest_dest["name"],
             )
 
             steps      = [first_step, metro_step, last_step]
@@ -419,11 +448,12 @@ class HybridRouteService:
             total_cost = first_step.cost_rupees + metro_cost + last_step.cost_rupees
             arrival    = departure_time + timedelta(minutes=total_dur)
 
-            # Build a human-readable label
+            # Build a human-readable label (append city tag for non-Delhi)
             def _mode_label(step: RouteStep) -> str:
                 return {"walk": "Walk", "auto": "Auto", "cab": "Cab"}.get(step.mode, step.mode.title())
 
-            label = f"Metro ({_mode_label(first_step)} + Metro + {_mode_label(last_step)})"
+            city_tag  = "" if _is_delhi(city) else f" [{city}]"
+            label     = f"Metro ({_mode_label(first_step)} + Metro + {_mode_label(last_step)}){city_tag}"
 
             on_time_prob = max(0.5, 1.0 - weather_risk * 0.3)
 
@@ -440,6 +470,7 @@ class HybridRouteService:
                 comfort_score=         0.7,
                 on_time_probability=   on_time_prob,
                 weather_delay_risk=    weather_risk,
+                city=                  city,
             )
 
         except Exception as e:
