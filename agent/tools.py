@@ -34,16 +34,17 @@ GEMINI_TOOLS = [
         types.FunctionDeclaration(
             name="get_weather",
             description=(
-                "Get current weather conditions in Delhi and their impact on commuting. "
+                "Get current weather conditions at the user's origin location and their impact on commuting. "
                 "Returns delay risk, affected transport modes, and a recommendation. "
-                "Always call this first."
+                "Always call this first, passing the geocoded lat/lng of the origin address."
             ),
             parameters=S(
                 type=T.OBJECT,
                 properties={
-                    "lat": S(type=T.NUMBER, description="Latitude (default: Delhi centre 28.6139)"),
-                    "lon": S(type=T.NUMBER, description="Longitude (default: Delhi centre 77.2090)"),
+                    "lat": S(type=T.NUMBER, description="Latitude of the user's origin location"),
+                    "lon": S(type=T.NUMBER, description="Longitude of the user's origin location"),
                 },
+                required=["lat", "lon"],
             ),
         ),
 
@@ -128,6 +129,23 @@ GEMINI_TOOLS = [
             ),
         ),
 
+        types.FunctionDeclaration(
+            name="get_user_history",
+            description=(
+                "Retrieve the user's recent trip history from the database. "
+                "Returns up to 10 past trips with origin, destination, mode, duration, cost, and time. "
+                "Use this to personalise recommendations — detect preferred modes, usual routes, "
+                "and typical journey times before suggesting a plan."
+            ),
+            parameters=S(
+                type=T.OBJECT,
+                properties={
+                    "user_id": S(type=T.STRING, description="The authenticated user's UUID"),
+                },
+                required=["user_id"],
+            ),
+        ),
+
     ])
 ]
 
@@ -159,6 +177,9 @@ async def execute_tool(tool_name: str, tool_input: Dict[str, Any]) -> str:
 
         elif tool_name == "calculate_leave_time":
             result = _calculate_leave_time(tool_input)
+
+        elif tool_name == "get_user_history":
+            result = await _get_user_history(tool_input)
 
         else:
             result = {"error": f"Unknown tool: {tool_name}"}
@@ -348,4 +369,18 @@ def _calculate_leave_time(inp: Dict) -> Dict:
         "urgency":               urgency,
         "risk_score":            round(risk, 2),
         "already_late":          mins_until < 0,
+    }
+
+
+async def _get_user_history(inp: Dict) -> Dict:
+    user_id = inp.get("user_id", "").strip()
+    if not user_id:
+        return {"error": "user_id is required", "trips": [], "count": 0}
+
+    from database.supabase_client import get_client
+    trips = get_client().get_trip_history(user_id, limit=10)
+    return {
+        "trips": trips,
+        "count": len(trips),
+        "has_history": len(trips) > 0,
     }

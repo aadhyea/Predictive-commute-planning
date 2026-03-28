@@ -21,21 +21,120 @@ from database.models import (
 
 logger = logging.getLogger(__name__)
 
+# Shared client used for auth operations (supabase.auth.*) and unauthenticated reads.
+supabase: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+
+
+def _authed_client(access_token: str) -> Client:
+    """
+    Return a fresh Supabase client with the user's JWT set on the PostgREST layer.
+    Use this for every write that must pass RLS — never reuse a shared instance for
+    user-scoped inserts, because the shared client may not carry the current session.
+    """
+    client = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+    client.postgrest.auth(access_token)
+    return client
+
 
 class SupabaseClient:
     """Supabase database client with all CRUD operations"""
 
-    def __init__(self):
-        self._client: Optional[Client] = None
-
     @property
     def client(self) -> Client:
-        if self._client is None:
-            self._client = create_client(
-                settings.SUPABASE_URL,
-                settings.SUPABASE_KEY,
+        return supabase
+
+    # ============================================
+    # TRIPS
+    # ============================================
+
+    def log_trip(
+        self,
+        access_token: str,
+        user_id: str,
+        origin: str,
+        destination: str,
+        city: Optional[str],
+        route_label: str,
+        mode: str,
+        duration_min: int,
+        cost_inr: int,
+    ) -> bool:
+        """Insert a trip record. Silently returns False on failure."""
+        try:
+            _authed_client(access_token).table("trips").insert({
+                "user_id":     user_id,
+                "origin":      origin,
+                "destination": destination,
+                "city":        city,
+                "route_label": route_label,
+                "mode":        mode,
+                "duration_min": duration_min,
+                "cost_inr":    cost_inr,
+            }).execute()
+            return True
+        except Exception as e:
+            logger.error(f"Failed to log trip: {e}")
+            return False
+
+    def get_trip_history(self, user_id: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """Return the most recent trips for a user."""
+        try:
+            resp = (
+                self.client.table("trips")
+                .select("origin,destination,route_label,mode,duration_min,cost_inr,planned_at")
+                .eq("user_id", user_id)
+                .order("planned_at", desc=True)
+                .limit(limit)
+                .execute()
             )
-        return self._client
+            return resp.data or []
+        except Exception as e:
+            logger.error(f"Failed to get trip history: {e}")
+            return []
+
+    # ============================================
+    # SAVED COMMUTES
+    # ============================================
+
+    def save_commute(
+        self, access_token: str, user_id: str, name: str, origin: str, destination: str
+    ) -> bool:
+        """Bookmark an origin/destination pair for quick replan."""
+        try:
+            _authed_client(access_token).table("saved_commutes").insert({
+                "user_id":     user_id,
+                "name":        name,
+                "origin":      origin,
+                "destination": destination,
+            }).execute()
+            return True
+        except Exception as e:
+            logger.error(f"Failed to save commute: {e}")
+            return False
+
+    def get_saved_commutes(self, user_id: str) -> List[Dict[str, Any]]:
+        """Return all saved commutes for a user, newest first."""
+        try:
+            resp = (
+                self.client.table("saved_commutes")
+                .select("*")
+                .eq("user_id", user_id)
+                .order("created_at", desc=True)
+                .execute()
+            )
+            return resp.data or []
+        except Exception as e:
+            logger.error(f"Failed to get saved commutes: {e}")
+            return []
+
+    def delete_saved_commute(self, commute_id: str) -> bool:
+        """Delete a saved commute by its UUID."""
+        try:
+            self.client.table("saved_commutes").delete().eq("id", commute_id).execute()
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete saved commute: {e}")
+            return False
 
     # ============================================
     # USER PREFERENCES
@@ -368,12 +467,12 @@ class SupabaseClient:
             return []
 
 
-# Singleton instance
+# Singleton wrapper instance
 _client: Optional[SupabaseClient] = None
 
 
 def get_client() -> SupabaseClient:
-    """Get the singleton Supabase client"""
+    """Get the singleton SupabaseClient wrapper."""
     global _client
     if _client is None:
         _client = SupabaseClient()
