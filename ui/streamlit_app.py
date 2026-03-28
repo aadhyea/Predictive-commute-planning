@@ -22,72 +22,73 @@ import streamlit as st
 from streamlit_folium import st_folium
 from streamlit_searchbox import st_searchbox
 
-# ── Page config (must be first Streamlit call) ──────────────────────────────
-st.set_page_config(
-    page_title="Delhi Commute Agent",
-    page_icon="🚇",
-    layout="wide",
-    initial_sidebar_state="expanded",
+from auth.supabase_auth import (
+    get_current_user, is_logged_in, sign_in_magic_link,
+    sign_in_google, sign_out, handle_auth_callback,
 )
+from database.supabase_client import get_client, supabase
 
-# ── CSS ─────────────────────────────────────────────────────────────────────
-st.markdown("""
-<style>
-/* ── General ── */
-.main .block-container { padding-top: 1.5rem; }
-h1 { font-size: 2rem !important; }
-
-/* ── Urgency badges ── */
-.badge {
-    display: inline-block;
-    padding: 4px 14px;
-    border-radius: 20px;
-    font-weight: 700;
-    font-size: 0.85rem;
-    letter-spacing: 0.05em;
-}
-.badge-low      { background:#d4edda; color:#155724; }
-.badge-medium   { background:#fff3cd; color:#856404; }
-.badge-high     { background:#ffe0b2; color:#b34800; }
-.badge-critical { background:#f8d7da; color:#721c24; }
-
-/* ── Route cards ── */
-.route-card {
-    border: 1px solid #dee2e6;
-    border-radius: 10px;
-    padding: 16px;
-    margin-bottom: 12px;
-    background: #ffffff;
-    color: #212529 !important;
-}
-.route-card-best {
-    border: 2px solid #0d6efd;
-    border-radius: 10px;
-    padding: 16px;
-    margin-bottom: 12px;
-    background: #f0f5ff;
-    color: #212529 !important;
-}
-.route-label {
-    font-size: 1.1rem;
-    font-weight: 700;
-    color: #212529 !important;
-    margin-bottom: 8px;
-}
-
-/* ── Metric text — inherit from Streamlit theme ── */
-[data-testid="stMetricValue"]  { font-size: 1.25rem !important; font-weight: 700 !important; }
-[data-testid="stMetricLabel"]  { font-size: 0.8rem !important; opacity: 0.75; }
+# ── Bootstrap (before any rendering) ─────────────────────────────────────────
+handle_auth_callback()
+if "page" not in st.session_state:
+    st.session_state["page"] = "login"
+# Auto-redirect if a session was resolved by handle_auth_callback
+if is_logged_in() and st.session_state["page"] == "login":
+    st.session_state["page"] = "app"
 
 
-/* ── Chat ── */
-.chat-user  { background:#e9ecef; border-radius:12px 12px 2px 12px; padding:10px 14px; margin:6px 0; text-align:right; }
-.chat-agent { background:#f0f5ff; border-radius:12px 12px 12px 2px; padding:10px 14px; margin:6px 0; }
-</style>
-""", unsafe_allow_html=True)
+# ── Trip logging ──────────────────────────────────────────────────────────────
+def _mode_from_label(label: str) -> str:
+    """Derive a clean mode key from the route label string."""
+    l = label.lower()
+    if "cab" in l:
+        return "cab"
+    if "metro" in l:
+        return "metro_hybrid"
+    return "transit"
 
 
-# ── Async helper ────────────────────────────────────────────────────────────
+def _log_trip_background(access_token: str, user_id: str, result, origin: str, destination: str):
+    """Fire-and-forget trip logging — runs in a daemon thread."""
+    import threading
+
+    def _run():
+        try:
+            route = result.recommended_route or {}
+            get_client().log_trip(
+                access_token= access_token,
+                user_id=      user_id,
+                origin=       origin,
+                destination=  destination,
+                city=         route.get("city"),
+                route_label=  route.get("label", ""),
+                mode=         _mode_from_label(route.get("label", "")),
+                duration_min= route.get("total_duration_minutes", 0),
+                cost_inr=     int(route.get("total_cost_rupees") or 0),
+            )
+        except Exception:
+            pass  # Never crash the UI for a logging failure
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
+# ── Auth gate helper ──────────────────────────────────────────────────────────
+def require_auth(feature_name: str = "this feature") -> bool:
+    """
+    Returns True if the user is signed in.
+    If not, shows a polite inline prompt instead of the feature.
+    """
+    if is_logged_in():
+        return True
+    st.info(
+        f"Sign in to use {feature_name}. "
+        "You can still plan commutes as a guest.",
+        icon="🔒",
+    )
+    return False
+
+
+# ── Async helper ──────────────────────────────────────────────────────────────
 def run_async(coro):
     """Run an async coroutine from synchronous Streamlit code."""
     try:
@@ -100,7 +101,7 @@ def run_async(coro):
         return asyncio.run(coro)
 
 
-# ── Cached singletons ────────────────────────────────────────────────────────
+# ── Cached singletons ─────────────────────────────────────────────────────────
 @st.cache_resource(show_spinner=False)
 def get_agent():
     from agent.core import CommuteAgent
@@ -113,7 +114,7 @@ def get_maps_client():
     return maps_client
 
 
-# ── Formatting helpers ───────────────────────────────────────────────────────
+# ── Formatting helpers ────────────────────────────────────────────────────────
 
 
 def mode_icon(mode: str) -> str:
@@ -170,7 +171,7 @@ def extract_city_from_geo(geo: dict) -> str:
     return "unknown"
 
 
-# ── Map builder ──────────────────────────────────────────────────────────────
+# ── Map builder ───────────────────────────────────────────────────────────────
 def geocode_endpoints(origin: str, destination: str):
     """Geocode origin + destination once. Returns (o_geo, d_geo) dicts or (None, None)."""
     try:
@@ -228,7 +229,7 @@ def build_route_map(
     return m
 
 
-# ── QR code helper ───────────────────────────────────────────────────────────
+# ── QR code helper ────────────────────────────────────────────────────────────
 def _url_to_qr_bytes(url: str) -> bytes:
     """Return PNG bytes of a QR code for the given URL."""
     import io
@@ -328,348 +329,551 @@ def render_route_card(route: Dict[str, Any], is_best: bool = False):
         st.warning(note, icon="⚠️")
 
 
-# ── SIDEBAR ───────────────────────────────────────────────────────────────────
-with st.sidebar:
-    st.markdown("## ⚙️ Preferences")
-    st.divider()
-
-    buffer_minutes = st.slider(
-        "Safety buffer (min)", min_value=5, max_value=45, value=15, step=5,
-        help="Extra time you want before your arrival deadline",
-    )
-    prefer_comfort = st.toggle("Prefer comfort over speed", value=True)
-    max_walk = st.slider(
-        "Max walking (min)", min_value=5, max_value=30, value=10, step=5
+# ══════════════════════════════════════════════════════════════════════════════
+# LOGIN PAGE
+# ══════════════════════════════════════════════════════════════════════════════
+def render_login_page():
+    st.set_page_config(
+        page_title="Delhi Commute Agent",
+        page_icon="🚇",
+        layout="centered",
     )
 
+    st.title("🚇 India Commute Agent")
+    st.caption("AI-powered commute planning across Indian cities — real-time routes, weather, and smart timing")
     st.divider()
-    st.markdown("### 🌆 City")
-    CITY_OPTIONS = [
-        "Auto-detect", "Delhi / NCR", "Mumbai", "Bengaluru",
-        "Chennai", "Hyderabad", "Kolkata", "Pune", "Ahmedabad",
-    ]
-    city_override = st.selectbox(
-        "City (overrides auto-detect)",
-        options=CITY_OPTIONS,
-        index=0,
-        help="Auto-detect reads the city from your origin address. Override if detection is wrong.",
-    )
-    # Persist so it survives reruns without being inside the form
-    st.session_state["city_override"] = city_override
 
-    st.divider()
-    st.markdown("### 📍 Quick Fill")
-    def _quick_fill(origin: str, dest: str):
-        st.session_state["origin_input"]      = origin
-        st.session_state["destination_input"] = dest
-        # Clear searchbox internal state so they re-render with new defaults
-        st.session_state.pop("origin_searchbox", None)
-        st.session_state.pop("dest_searchbox", None)
+    tab_magic, tab_google = st.tabs(["Magic link", "Google"])
 
-    if st.button("🏠 Delhi: Rajiv Chowk → Cyber City", use_container_width=True):
-        _quick_fill("Rajiv Chowk Metro Station, Delhi", "Cyber City, Gurugram")
-    if st.button("📍 Delhi: CP → Noida Sector 62", use_container_width=True):
-        _quick_fill("Connaught Place, New Delhi", "Noida Sector 62, Uttar Pradesh")
-    if st.button("✈️ Bangalore: Indiranagar → Whitefield", use_container_width=True):
-        _quick_fill("Indiranagar, Bengaluru", "Whitefield, Bengaluru")
-    if st.button("🌊 Mumbai: Andheri → Bandra Kurla Complex", use_container_width=True):
-        _quick_fill("Andheri Station, Mumbai", "Bandra Kurla Complex, Mumbai")
+    with tab_magic:
+        email = st.text_input("Email address", key="login_email")
+        if st.button("Send magic link", use_container_width=True, type="primary"):
+            if sign_in_magic_link(email):
+                st.success("Check your inbox for a sign-in link.")
+            else:
+                st.error("Could not send link — check the email address.")
+
+    with tab_google:
+        google_url = sign_in_google()
+        if google_url:
+            st.link_button("Continue with Google", google_url, use_container_width=True)
+        else:
+            st.error("Google sign-in is unavailable right now.")
 
     st.divider()
-    st.caption("Delhi Commute Agent · Powered by Gemini 2.5 Flash")
-
-
-# ── HEADER ────────────────────────────────────────────────────────────────────
-st.markdown("# 🚇 India Commute Agent")
-st.markdown("*AI-powered commute planning across Indian cities — real-time routes, weather, and smart timing*")
-st.divider()
-
-
-# ── TABS ─────────────────────────────────────────────────────────────────────
-tab_plan, tab_chat = st.tabs(["🗺️  Plan Commute", "💬  Chat with Agent"])
+    if st.button("Enter as Guest", type="secondary"):
+        st.session_state["page"] = "app"
+        st.session_state["user"] = None
+        st.rerun()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TAB 1 — PLAN COMMUTE
+# MAIN APP
 # ══════════════════════════════════════════════════════════════════════════════
-with tab_plan:
+def render_app():
+    st.set_page_config(
+        page_title="Delhi Commute Agent",
+        page_icon="🚇",
+        layout="wide",
+        initial_sidebar_state="expanded",
+    )
 
-    # ── Origin / Destination searchboxes (must be outside st.form for autocomplete) ──
-    col_o, col_d = st.columns(2)
-    with col_o:
-        st.markdown("**🏠 From**")
-        origin = st_searchbox(
-            search_places_autocomplete,
-            placeholder="Start typing your origin…",
-            default=st.session_state.get("origin_input", "Rajiv Chowk Metro Station, Delhi"),
-            key="origin_searchbox",
-            clear_on_submit=False,
+    # ── CSS ───────────────────────────────────────────────────────────────────
+    st.markdown("""
+<style>
+/* ── General ── */
+.main .block-container { padding-top: 1.5rem; }
+h1 { font-size: 2rem !important; }
+
+/* ── Urgency badges ── */
+.badge {
+    display: inline-block;
+    padding: 4px 14px;
+    border-radius: 20px;
+    font-weight: 700;
+    font-size: 0.85rem;
+    letter-spacing: 0.05em;
+}
+.badge-low      { background:#d4edda; color:#155724; }
+.badge-medium   { background:#fff3cd; color:#856404; }
+.badge-high     { background:#ffe0b2; color:#b34800; }
+.badge-critical { background:#f8d7da; color:#721c24; }
+
+/* ── Route cards ── */
+.route-card {
+    border: 1px solid #dee2e6;
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 12px;
+    background: #ffffff;
+    color: #212529 !important;
+}
+.route-card-best {
+    border: 2px solid #0d6efd;
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 12px;
+    background: #f0f5ff;
+    color: #212529 !important;
+}
+.route-label {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #212529 !important;
+    margin-bottom: 8px;
+}
+
+/* ── Metric text — inherit from Streamlit theme ── */
+[data-testid="stMetricValue"]  { font-size: 1.25rem !important; font-weight: 700 !important; }
+[data-testid="stMetricLabel"]  { font-size: 0.8rem !important; opacity: 0.75; }
+
+
+/* ── Chat ── */
+.chat-user  { background:#e9ecef; border-radius:12px 12px 2px 12px; padding:10px 14px; margin:6px 0; text-align:right; }
+.chat-agent { background:#f0f5ff; border-radius:12px 12px 12px 2px; padding:10px 14px; margin:6px 0; }
+</style>
+""", unsafe_allow_html=True)
+
+    # ── Welcome bar ───────────────────────────────────────────────────────────
+    user = get_current_user()
+    _wb_spacer, _wb_info, _wb_btn = st.columns([6, 2, 1])
+    if user:
+        _full_name = (getattr(user, "user_metadata", None) or {}).get("full_name")
+        _display = _full_name or getattr(user, "email", "")
+        with _wb_info:
+            st.markdown(
+                f"<div style='text-align:right; padding-top:6px'>Welcome, {_display}</div>",
+                unsafe_allow_html=True,
+            )
+        with _wb_btn:
+            if st.button("Sign out", key="wb_signout"):
+                sign_out()
+                st.session_state["page"] = "login"
+                st.rerun()
+    else:
+        with _wb_info:
+            st.markdown(
+                "<div style='text-align:right; padding-top:6px'>Browsing as guest</div>",
+                unsafe_allow_html=True,
+            )
+        with _wb_btn:
+            if st.button("Sign in", key="wb_signin"):
+                st.session_state["page"] = "login"
+                st.rerun()
+
+    # ── SIDEBAR ───────────────────────────────────────────────────────────────
+    with st.sidebar:
+
+        st.divider()
+        st.markdown("## ⚙️ Preferences")
+        st.divider()
+
+        buffer_minutes = st.slider(
+            "Safety buffer (min)", min_value=5, max_value=45, value=15, step=5,
+            help="Extra time you want before your arrival deadline",
         )
-    with col_d:
-        st.markdown("**🏢 To**")
-        destination = st_searchbox(
-            search_places_autocomplete,
-            placeholder="Start typing your destination…",
-            default=st.session_state.get("destination_input", "Cyber City, Gurugram"),
-            key="dest_searchbox",
-            clear_on_submit=False,
+        prefer_comfort = st.toggle("Prefer comfort over speed", value=True)
+        max_walk = st.slider(
+            "Max walking (min)", min_value=5, max_value=30, value=10, step=5
         )
 
-    # ── Remaining inputs + submit (inside form to batch the submit action) ────
-    with st.form("plan_form"):
-        col_date, col_time, col_extra = st.columns([1, 1, 2])
+        st.divider()
+        st.markdown("### 🌆 City")
+        CITY_OPTIONS = [
+            "Auto-detect", "Delhi / NCR", "Mumbai", "Bengaluru",
+            "Chennai", "Hyderabad", "Kolkata", "Pune", "Ahmedabad",
+        ]
+        city_override = st.selectbox(
+            "City (overrides auto-detect)",
+            options=CITY_OPTIONS,
+            index=0,
+            help="Auto-detect reads the city from your origin address. Override if detection is wrong.",
+        )
+        # Persist so it survives reruns without being inside the form
+        st.session_state["city_override"] = city_override
 
-        with col_date:
-            travel_date = st.date_input("📅 Date", value=date.today())
-        with col_time:
-            arrival_time = st.time_input("⏰ Arrive by", value=time(9, 30))
-        with col_extra:
-            extra_context = st.text_input(
-                "💬 Extra context (optional)",
-                placeholder="e.g. carrying heavy luggage, it's raining outside…",
+        st.divider()
+        st.markdown("### 📍 Quick Fill")
+        def _quick_fill(origin: str, dest: str):
+            st.session_state["origin_input"]      = origin
+            st.session_state["destination_input"] = dest
+            # Clear searchbox internal state so they re-render with new defaults
+            st.session_state.pop("origin_searchbox", None)
+            st.session_state.pop("dest_searchbox", None)
+
+        if st.button("🏠 Delhi: Rajiv Chowk → Cyber City", use_container_width=True):
+            _quick_fill("Rajiv Chowk Metro Station, Delhi", "Cyber City, Gurugram")
+        if st.button("📍 Delhi: CP → Noida Sector 62", use_container_width=True):
+            _quick_fill("Connaught Place, New Delhi", "Noida Sector 62, Uttar Pradesh")
+        if st.button("✈️ Bangalore: Indiranagar → Whitefield", use_container_width=True):
+            _quick_fill("Indiranagar, Bengaluru", "Whitefield, Bengaluru")
+        if st.button("🌊 Mumbai: Andheri → Bandra Kurla Complex", use_container_width=True):
+            _quick_fill("Andheri Station, Mumbai", "Bandra Kurla Complex, Mumbai")
+
+        st.divider()
+
+        # ── Saved commutes (logged-in users only) ─────────────────────────────
+        _sidebar_user = get_current_user()
+        if _sidebar_user:
+            saved = get_client().get_saved_commutes(_sidebar_user.id)
+            if saved:
+                st.markdown("### 🔖 Saved Commutes")
+                for c in saved:
+                    col_btn, col_del = st.columns([5, 1])
+                    with col_btn:
+                        if st.button(c["name"], key=f"saved_{c['id']}", use_container_width=True):
+                            _quick_fill(c["origin"], c["destination"])
+                            st.rerun()
+                    with col_del:
+                        if st.button("✕", key=f"del_{c['id']}", help="Remove"):
+                            get_client().delete_saved_commute(c["id"])
+                            st.rerun()
+                st.divider()
+
+        st.caption("Delhi Commute Agent · Powered by Gemini 2.5 Flash")
+
+
+    # ── HEADER ────────────────────────────────────────────────────────────────
+    st.markdown("# 🚇 India Commute Agent")
+    st.markdown("*AI-powered commute planning across Indian cities — real-time routes, weather, and smart timing*")
+    st.divider()
+
+
+    # ── TABS ──────────────────────────────────────────────────────────────────
+    tab_plan, tab_chat = st.tabs(["🗺️  Plan Commute", "💬  Chat with Agent"])
+
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # TAB 1 — PLAN COMMUTE
+    # ══════════════════════════════════════════════════════════════════════════
+    with tab_plan:
+
+        # ── Origin / Destination searchboxes (must be outside st.form for autocomplete) ──
+        col_o, col_d = st.columns(2)
+        with col_o:
+            st.markdown("**🏠 From**")
+            origin = st_searchbox(
+                search_places_autocomplete,
+                placeholder="Start typing your origin…",
+                default=st.session_state.get("origin_input", "Rajiv Chowk Metro Station, Delhi"),
+                key="origin_searchbox",
+                clear_on_submit=False,
+            )
+        with col_d:
+            st.markdown("**🏢 To**")
+            destination = st_searchbox(
+                search_places_autocomplete,
+                placeholder="Start typing your destination…",
+                default=st.session_state.get("destination_input", "Cyber City, Gurugram"),
+                key="dest_searchbox",
+                clear_on_submit=False,
             )
 
-        submitted = st.form_submit_button(
-            "🔍  Plan My Commute", use_container_width=True, type="primary"
-        )
+        # ── Remaining inputs + submit (inside form to batch the submit action) ──
+        with st.form("plan_form"):
+            col_date, col_time, col_extra = st.columns([1, 1, 2])
 
-    # ── Run agent on submit ───────────────────────────────────────────────────
-    if submitted:
-        # st_searchbox returns None until user selects; fall back to session default
-        origin      = origin      or st.session_state.get("origin_input", "")
-        destination = destination or st.session_state.get("destination_input", "")
-        if not (origin or "").strip() or not (destination or "").strip():
-            st.error("Please enter both origin and destination.")
-        else:
-            required_arrival = datetime.combine(travel_date, arrival_time).isoformat()
+            with col_date:
+                travel_date = st.date_input("📅 Date", value=date.today())
+            with col_time:
+                arrival_time = st.time_input("⏰ Arrive by", value=time(9, 30))
+            with col_extra:
+                extra_context = st.text_input(
+                    "💬 Extra context (optional)",
+                    placeholder="e.g. carrying heavy luggage, it's raining outside…",
+                )
 
-            user_prefs = {
-                "buffer_minutes":         buffer_minutes,
-                "prefer_comfort_over_speed": prefer_comfort,
-                "max_walking_minutes":    max_walk,
-            }
+            submitted = st.form_submit_button(
+                "🔍  Plan My Commute", use_container_width=True, type="primary"
+            )
 
-            with st.spinner("🤖 Agent is planning your commute…"):
-                try:
-                    result = run_async(
-                        get_agent().plan_commute(
-                            origin=           origin,
-                            destination=      destination,
-                            required_arrival= required_arrival,
-                            user_prefs=       user_prefs,
-                            extra_context=    extra_context or None,
+        # ── Run agent on submit ───────────────────────────────────────────────
+        if submitted:
+            # st_searchbox returns None until user selects; fall back to session default
+            origin      = origin      or st.session_state.get("origin_input", "")
+            destination = destination or st.session_state.get("destination_input", "")
+            if not (origin or "").strip() or not (destination or "").strip():
+                st.error("Please enter both origin and destination.")
+            else:
+                required_arrival = datetime.combine(travel_date, arrival_time).isoformat()
+
+                user_prefs = {
+                    "buffer_minutes":         buffer_minutes,
+                    "prefer_comfort_over_speed": prefer_comfort,
+                    "max_walking_minutes":    max_walk,
+                }
+
+                with st.spinner("🤖 Agent is planning your commute…"):
+                    try:
+                        _current_user = get_current_user()
+                        result = run_async(
+                            get_agent().plan_commute(
+                                origin=           origin,
+                                destination=      destination,
+                                required_arrival= required_arrival,
+                                user_prefs=       user_prefs,
+                                extra_context=    extra_context or None,
+                                user_id=          _current_user.id if _current_user else None,
+                            )
                         )
+                        st.session_state["plan_result"]      = result
+                        st.session_state["plan_origin"]      = origin
+                        st.session_state["plan_destination"] = destination
+
+                        # Log trip silently if signed in
+                        _user = get_current_user()
+                        if _user:
+                            _session = supabase.auth.get_session()
+                            if _session and _session.access_token:
+                                _log_trip_background(_session.access_token, _user.id, result, origin, destination)
+                        # Geocode once and cache for maps + city detection
+                        o_geo, d_geo = geocode_endpoints(origin, destination)
+                        st.session_state["plan_o_geo"] = o_geo
+                        st.session_state["plan_d_geo"] = d_geo
+                        # Detect city from geocode result
+                        auto_city = extract_city_from_geo(o_geo)
+                        chosen_city = st.session_state.get("city_override", "Auto-detect")
+                        st.session_state["detected_city"] = (
+                            chosen_city if chosen_city != "Auto-detect" else auto_city
+                        )
+                    except Exception as e:
+                        st.error(f"Agent error: {e}")
+                        st.session_state.pop("plan_result", None)
+
+        # ── Display results ───────────────────────────────────────────────────
+        if result := st.session_state.get("plan_result"):
+            st.divider()
+
+            # City detection banner
+            detected_city = st.session_state.get("detected_city", "unknown")
+            city_override_val = st.session_state.get("city_override", "Auto-detect")
+            if detected_city and detected_city != "unknown":
+                source_note = " (manually selected)" if city_override_val != "Auto-detect" else " (auto-detected)"
+                st.info(f"📍 **City: {detected_city}**{source_note} · Routing strategy selected accordingly. Wrong city? Change it in the sidebar.", icon=None)
+
+            # Row 1: Weather | Leave-by | Urgency
+            r1c1, r1c2, r1c3 = st.columns([2, 2, 1])
+
+            with r1c1:
+                wx   = result.weather_summary or "Weather data not available."
+                risk = result.risk_score
+                wx_icon = "🌤️" if risk < 0.3 else ("🌧️" if risk < 0.6 else "⛈️")
+                _wx_city = st.session_state.get("detected_city") or ""
+                _wx_label = f"Weather in {_wx_city}" if _wx_city and _wx_city != "unknown" else "Weather"
+                if risk < 0.3:
+                    st.success(f"{wx_icon} **{_wx_label}** — {wx}")
+                elif risk < 0.6:
+                    st.warning(f"{wx_icon} **{_wx_label}** — {wx}")
+                else:
+                    st.error(f"{wx_icon} **{_wx_label}** — {wx}")
+
+            with r1c2:
+                if result.leave_by:
+                    st.metric(
+                        label="⏰ Leave by",
+                        value=result.leave_by,
+                        help=f"Includes your {buffer_minutes} min safety buffer",
                     )
-                    st.session_state["plan_result"]      = result
-                    st.session_state["plan_origin"]      = origin
-                    st.session_state["plan_destination"] = destination
-                    # Geocode once and cache for maps + city detection
-                    o_geo, d_geo = geocode_endpoints(origin, destination)
-                    st.session_state["plan_o_geo"] = o_geo
-                    st.session_state["plan_d_geo"] = d_geo
-                    # Detect city from geocode result
-                    auto_city = extract_city_from_geo(o_geo)
-                    chosen_city = st.session_state.get("city_override", "Auto-detect")
-                    st.session_state["detected_city"] = (
-                        chosen_city if chosen_city != "Auto-detect" else auto_city
+                else:
+                    st.info("See agent recommendation for departure time.")
+
+            with r1c3:
+                urgency_icons = {"LOW": "🟢", "MEDIUM": "🟡", "HIGH": "🟠", "CRITICAL": "🔴"}
+                icon = urgency_icons.get(result.urgency.upper(), "⚪")
+                st.metric(
+                    label="Urgency",
+                    value=f"{icon} {result.urgency}",
+                    help=f"Risk score: {result.risk_score:.0%}",
+                )
+
+            st.divider()
+
+            # Row 2: Agent recommendation — summary + expandable full text
+            st.markdown("### 🤖 Agent Recommendation")
+
+            # Show only the first paragraph/block as the headline summary
+            paragraphs = [p.strip() for p in result.explanation.split("\n\n") if p.strip()]
+            if paragraphs:
+                st.info(paragraphs[0])          # first paragraph prominent
+                if len(paragraphs) > 1:
+                    with st.expander("Full analysis", expanded=False):
+                        st.markdown("\n\n".join(paragraphs[1:]))
+            else:
+                st.info(result.explanation[:300] + ("…" if len(result.explanation) > 300 else ""))
+
+            # Disruptions
+            for d in result.disruptions:
+                st.warning(d, icon="🚨")
+
+            # Tools used (debug expandable)
+            if result.tool_calls_made:
+                with st.expander("🔧 Tools used by agent", expanded=False):
+                    st.write(" → ".join(result.tool_calls_made))
+
+            # ── Save this commute ──────────────────────────────────────────────
+            with st.expander("🔖 Save this commute", expanded=False):
+                if require_auth("saved commutes"):
+                    _origin      = st.session_state.get("plan_origin", "")
+                    _destination = st.session_state.get("plan_destination", "")
+                    _default_name = f"{_origin.split(',')[0]} → {_destination.split(',')[0]}"
+                    save_col1, save_col2 = st.columns([3, 1])
+                    with save_col1:
+                        save_name = st.text_input(
+                            "Name", value=_default_name, key="save_commute_name",
+                            label_visibility="collapsed",
+                            placeholder="e.g. Home → Office",
+                        )
+                    with save_col2:
+                        if st.button("Save", key="save_commute_btn", use_container_width=True):
+                            _u = get_current_user()
+                            _session = supabase.auth.get_session()
+                            if save_name.strip() and _u and _session and _session.access_token:
+                                ok = get_client().save_commute(
+                                    access_token= _session.access_token,
+                                    user_id=      _u.id,
+                                    name=         save_name.strip(),
+                                    origin=       _origin,
+                                    destination=  _destination,
+                                )
+                                if ok:
+                                    st.success("Saved! It'll appear in your sidebar.")
+                                else:
+                                    st.error("Could not save — please try again.")
+                            elif _u and not (_session and _session.access_token):
+                                st.error("Session expired — please sign in again.")
+
+            st.divider()
+
+            # Row 3: Route options in tabs (full width per route)
+            st.markdown("### 🛣️ Route Options")
+
+            routes = []
+            if result.recommended_route:
+                routes.append(result.recommended_route)
+            routes.extend(result.alternative_routes or [])
+
+            if routes:
+                tab_labels = []
+                for i, r in enumerate(routes[:3]):
+                    label      = r.get("label", f"Route {i+1}")
+                    dur        = fmt_duration(r.get("total_duration_minutes", 0))
+                    cost       = r.get("total_cost_rupees", 0)
+                    city_badge = f" [{r['city']}]" if r.get("city") and r["city"].lower() not in ("delhi", "new delhi", "unknown") else ""
+                    tab_labels.append(f"{'⭐ ' if i==0 else ''}{label}{city_badge}  ·  {dur}  ·  ₹{cost}")
+
+                o_geo = st.session_state.get("plan_o_geo")
+                d_geo = st.session_state.get("plan_d_geo")
+
+                route_tabs = st.tabs(tab_labels)
+                for i, (tab, route, is_best) in enumerate(zip(route_tabs, routes[:3], [True, False, False])):
+                    with tab:
+                        render_route_card(route, is_best=is_best)
+
+                        # ── Route map (per tab) ───────────────────────────────
+                        if o_geo and d_geo:
+                            polyline = route.get("overview_polyline", "")
+                            fmap = build_route_map(
+                                o_geo["lat"], o_geo["lng"],
+                                d_geo["lat"], d_geo["lng"],
+                                origin_label=st.session_state.get("plan_origin", ""),
+                                destination_label=st.session_state.get("plan_destination", ""),
+                                overview_polyline=polyline,
+                            )
+                            st_folium(fmap, use_container_width=True, height=380,
+                                      returned_objects=[], key=f"route_map_{i}")
+
+                        # ── Cab booking buttons + QR codes ───────────────────
+                        route_label = route.get("label", "").lower()
+                        if "cab" in route_label:
+                            est_cost = route.get("total_cost_rupees", 0)
+                            st.markdown(f"**🚕 Book this ride** · Estimated ₹{est_cost}")
+                            origin_txt = st.session_state.get("plan_origin", "")
+                            dest_txt   = st.session_state.get("plan_destination", "")
+                            uber_url = _build_uber_link(origin_txt, dest_txt, o_geo, d_geo)
+                            ola_url  = _build_ola_link(origin_txt, dest_txt, o_geo, d_geo)
+
+                            uber_col, ola_col, note_col = st.columns([1, 1, 2])
+                            with uber_col:
+                                st.link_button("Open in Uber 🟡", uber_url, use_container_width=True)
+                                try:
+                                    uber_app_url = _build_uber_app_link(origin_txt, dest_txt, o_geo, d_geo)
+                                    st.image(_url_to_qr_bytes(uber_app_url), width=120,
+                                             caption="Scan to open Uber app")
+                                except Exception:
+                                    pass
+                            with ola_col:
+                                st.link_button("Open in Ola 🟢", ola_url, use_container_width=True)
+                                try:
+                                    st.image(_url_to_qr_bytes(ola_url), width=120,
+                                             caption="Scan to open Ola app")
+                                except Exception:
+                                    pass
+                            with note_col:
+                                st.caption("📱 Scan the QR code with your phone to open the app with source & destination pre-filled.")
+            else:
+                st.info("No route data returned — see agent explanation above.")
+
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # TAB 2 — CHAT
+    # ══════════════════════════════════════════════════════════════════════════
+    with tab_chat:
+        st.markdown("Ask anything about your commute — the agent has access to real-time weather, routes, and metro data.")
+
+        # Initialise history
+        if "chat_history" not in st.session_state:
+            st.session_state["chat_history"] = []
+
+        # Display existing messages
+        for msg in st.session_state["chat_history"]:
+            role = msg["role"]
+            text = msg["text"]
+            if role == "user":
+                st.markdown(f'<div class="chat-user">👤 {text}</div>', unsafe_allow_html=True)
+            else:
+                st.markdown(f'<div class="chat-agent">🤖 {text}</div>', unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # Input
+        with st.form("chat_form", clear_on_submit=True):
+            chat_col1, chat_col2 = st.columns([5, 1])
+            with chat_col1:
+                user_input = st.text_input(
+                    "Message",
+                    placeholder="e.g. What's the fastest way from Noida to Aerocity right now?",
+                    label_visibility="collapsed",
+                )
+            with chat_col2:
+                chat_submitted = st.form_submit_button("Send", use_container_width=True, type="primary")
+
+        if chat_submitted and user_input.strip():
+            # Build history for agent (only last 10 turns to keep context short)
+            history = st.session_state["chat_history"][-10:]
+
+            st.session_state["chat_history"].append({"role": "user", "text": user_input})
+
+            with st.spinner("Agent is thinking…"):
+                try:
+                    reply = run_async(
+                        get_agent().chat(
+                            user_message=user_input,
+                            history=history,
+                        )
                     )
                 except Exception as e:
-                    st.error(f"Agent error: {e}")
-                    st.session_state.pop("plan_result", None)
+                    reply = f"Error: {e}"
 
-    # ── Display results ───────────────────────────────────────────────────────
-    if result := st.session_state.get("plan_result"):
-        st.divider()
+            st.session_state["chat_history"].append({"role": "agent", "text": reply})
+            st.rerun()
 
-        # City detection banner
-        detected_city = st.session_state.get("detected_city", "unknown")
-        city_override_val = st.session_state.get("city_override", "Auto-detect")
-        if detected_city and detected_city != "unknown":
-            source_note = " (manually selected)" if city_override_val != "Auto-detect" else " (auto-detected)"
-            st.info(f"📍 **City: {detected_city}**{source_note} · Routing strategy selected accordingly. Wrong city? Change it in the sidebar.", icon=None)
-
-        # Row 1: Weather | Leave-by | Urgency
-        r1c1, r1c2, r1c3 = st.columns([2, 2, 1])
-
-        with r1c1:
-            wx   = result.weather_summary or "Weather data not available."
-            risk = result.risk_score
-            wx_icon = "🌤️" if risk < 0.3 else ("🌧️" if risk < 0.6 else "⛈️")
-            if risk < 0.3:
-                st.success(f"{wx_icon} **Weather** — {wx}")
-            elif risk < 0.6:
-                st.warning(f"{wx_icon} **Weather** — {wx}")
-            else:
-                st.error(f"{wx_icon} **Weather** — {wx}")
-
-        with r1c2:
-            if result.leave_by:
-                st.metric(
-                    label="⏰ Leave by",
-                    value=result.leave_by,
-                    help=f"Includes your {buffer_minutes} min safety buffer",
-                )
-            else:
-                st.info("See agent recommendation for departure time.")
-
-        with r1c3:
-            urgency_icons = {"LOW": "🟢", "MEDIUM": "🟡", "HIGH": "🟠", "CRITICAL": "🔴"}
-            icon = urgency_icons.get(result.urgency.upper(), "⚪")
-            st.metric(
-                label="Urgency",
-                value=f"{icon} {result.urgency}",
-                help=f"Risk score: {result.risk_score:.0%}",
-            )
-
-        st.divider()
-
-        # Row 2: Agent recommendation — summary + expandable full text
-        st.markdown("### 🤖 Agent Recommendation")
-
-        # Show only the first paragraph/block as the headline summary
-        paragraphs = [p.strip() for p in result.explanation.split("\n\n") if p.strip()]
-        if paragraphs:
-            st.info(paragraphs[0])          # first paragraph prominent
-            if len(paragraphs) > 1:
-                with st.expander("Full analysis", expanded=False):
-                    st.markdown("\n\n".join(paragraphs[1:]))
-        else:
-            st.info(result.explanation[:300] + ("…" if len(result.explanation) > 300 else ""))
-
-        # Disruptions
-        for d in result.disruptions:
-            st.warning(d, icon="🚨")
-
-        # Tools used (debug expandable)
-        if result.tool_calls_made:
-            with st.expander("🔧 Tools used by agent", expanded=False):
-                st.write(" → ".join(result.tool_calls_made))
-
-        st.divider()
-
-        # Row 3: Route options in tabs (full width per route)
-        st.markdown("### 🛣️ Route Options")
-
-        routes = []
-        if result.recommended_route:
-            routes.append(result.recommended_route)
-        routes.extend(result.alternative_routes or [])
-
-        if routes:
-            tab_labels = []
-            for i, r in enumerate(routes[:3]):
-                label      = r.get("label", f"Route {i+1}")
-                dur        = fmt_duration(r.get("total_duration_minutes", 0))
-                cost       = r.get("total_cost_rupees", 0)
-                city_badge = f" [{r['city']}]" if r.get("city") and r["city"].lower() not in ("delhi", "new delhi", "unknown") else ""
-                tab_labels.append(f"{'⭐ ' if i==0 else ''}{label}{city_badge}  ·  {dur}  ·  ₹{cost}")
-
-            o_geo = st.session_state.get("plan_o_geo")
-            d_geo = st.session_state.get("plan_d_geo")
-
-            route_tabs = st.tabs(tab_labels)
-            for i, (tab, route, is_best) in enumerate(zip(route_tabs, routes[:3], [True, False, False])):
-                with tab:
-                    render_route_card(route, is_best=is_best)
-
-                    # ── Route map (per tab) ───────────────────────────────
-                    if o_geo and d_geo:
-                        polyline = route.get("overview_polyline", "")
-                        fmap = build_route_map(
-                            o_geo["lat"], o_geo["lng"],
-                            d_geo["lat"], d_geo["lng"],
-                            origin_label=st.session_state.get("plan_origin", ""),
-                            destination_label=st.session_state.get("plan_destination", ""),
-                            overview_polyline=polyline,
-                        )
-                        st_folium(fmap, use_container_width=True, height=380,
-                                  returned_objects=[], key=f"route_map_{i}")
-
-                    # ── Cab booking buttons + QR codes ───────────────────
-                    route_label = route.get("label", "").lower()
-                    if "cab" in route_label:
-                        est_cost = route.get("total_cost_rupees", 0)
-                        st.markdown(f"**🚕 Book this ride** · Estimated ₹{est_cost}")
-                        origin_txt = st.session_state.get("plan_origin", "")
-                        dest_txt   = st.session_state.get("plan_destination", "")
-                        uber_url = _build_uber_link(origin_txt, dest_txt, o_geo, d_geo)
-                        ola_url  = _build_ola_link(origin_txt, dest_txt, o_geo, d_geo)
-
-                        uber_col, ola_col, note_col = st.columns([1, 1, 2])
-                        with uber_col:
-                            st.link_button("Open in Uber 🟡", uber_url, use_container_width=True)
-                            try:
-                                uber_app_url = _build_uber_app_link(origin_txt, dest_txt, o_geo, d_geo)
-                                st.image(_url_to_qr_bytes(uber_app_url), width=120,
-                                         caption="Scan to open Uber app")
-                            except Exception:
-                                pass
-                        with ola_col:
-                            st.link_button("Open in Ola 🟢", ola_url, use_container_width=True)
-                            try:
-                                st.image(_url_to_qr_bytes(ola_url), width=120,
-                                         caption="Scan to open Ola app")
-                            except Exception:
-                                pass
-                        with note_col:
-                            st.caption("📱 Scan the QR code with your phone to open the app with source & destination pre-filled.")
-        else:
-            st.info("No route data returned — see agent explanation above.")
+        if st.button("🗑️  Clear chat", use_container_width=False):
+            st.session_state["chat_history"] = []
+            st.rerun()
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 2 — CHAT
-# ══════════════════════════════════════════════════════════════════════════════
-with tab_chat:
-    st.markdown("Ask anything about your commute — the agent has access to real-time weather, routes, and metro data.")
-
-    # Initialise history
-    if "chat_history" not in st.session_state:
-        st.session_state["chat_history"] = []
-
-    # Display existing messages
-    for msg in st.session_state["chat_history"]:
-        role = msg["role"]
-        text = msg["text"]
-        if role == "user":
-            st.markdown(f'<div class="chat-user">👤 {text}</div>', unsafe_allow_html=True)
-        else:
-            st.markdown(f'<div class="chat-agent">🤖 {text}</div>', unsafe_allow_html=True)
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # Input
-    with st.form("chat_form", clear_on_submit=True):
-        chat_col1, chat_col2 = st.columns([5, 1])
-        with chat_col1:
-            user_input = st.text_input(
-                "Message",
-                placeholder="e.g. What's the fastest way from Noida to Aerocity right now?",
-                label_visibility="collapsed",
-            )
-        with chat_col2:
-            chat_submitted = st.form_submit_button("Send", use_container_width=True, type="primary")
-
-    if chat_submitted and user_input.strip():
-        # Build history for agent (only last 10 turns to keep context short)
-        history = st.session_state["chat_history"][-10:]
-
-        st.session_state["chat_history"].append({"role": "user", "text": user_input})
-
-        with st.spinner("Agent is thinking…"):
-            try:
-                reply = run_async(
-                    get_agent().chat(
-                        user_message=user_input,
-                        history=history,
-                    )
-                )
-            except Exception as e:
-                reply = f"Error: {e}"
-
-        st.session_state["chat_history"].append({"role": "agent", "text": reply})
-        st.rerun()
-
-    if st.button("🗑️  Clear chat", use_container_width=False):
-        st.session_state["chat_history"] = []
-        st.rerun()
+# ── Router ────────────────────────────────────────────────────────────────────
+if st.session_state["page"] == "login":
+    render_login_page()
+else:
+    render_app()
