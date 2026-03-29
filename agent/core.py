@@ -28,6 +28,7 @@ from google.genai import types
 from config import settings
 from agent.prompts import COMMUTE_AGENT_SYSTEM_PROMPT
 from agent.tools import GEMINI_TOOLS, execute_tool
+from maps.google_maps_client import maps_client
 
 logger = logging.getLogger(__name__)
 
@@ -100,12 +101,28 @@ class CommuteAgent:
         departure_time: Optional[str] = None,
         user_prefs: Optional[Dict[str, Any]] = None,
         extra_context: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> CommuteRecommendation:
         user_prefs    = user_prefs or {}
         departure_str = departure_time or datetime.now().isoformat()
 
+        # Geocode origin upfront so we can pass exact coordinates to get_weather.
+        # If geocoding fails we skip weather gracefully (no Delhi fallback).
+        origin_lat: Optional[float] = None
+        origin_lng: Optional[float] = None
+        try:
+            geo = await maps_client.geocode(origin)
+            if geo:
+                origin_lat = geo["lat"]
+                origin_lng = geo["lng"]
+        except Exception as e:
+            logger.warning(f"Could not geocode origin '{origin}' for weather: {e}")
+
         user_message = self._build_user_message(
-            origin, destination, required_arrival, departure_str, user_prefs, extra_context
+            origin, destination, required_arrival, departure_str, user_prefs, extra_context,
+            user_id=user_id,
+            origin_lat=origin_lat,
+            origin_lng=origin_lng,
         )
 
         contents: List[types.Content] = [
@@ -248,12 +265,20 @@ class CommuteAgent:
         departure_time: str,
         user_prefs: Dict,
         extra_context: Optional[str],
+        user_id: Optional[str] = None,
+        origin_lat: Optional[float] = None,
+        origin_lng: Optional[float] = None,
     ) -> str:
         lines = [
             f"Plan my commute from **{origin}** to **{destination}**.",
             f"Current time: {datetime.now().strftime('%A, %d %B %Y %H:%M')}",
             f"Planned departure: {departure_time}",
         ]
+        if origin_lat is not None and origin_lng is not None:
+            lines.append(
+                f"Origin coordinates (for get_weather): lat={origin_lat:.5f}, lon={origin_lng:.5f} — "
+                "use these exact values when calling get_weather."
+            )
         if required_arrival:
             lines.append(f"I must arrive by: {required_arrival}")
 
@@ -268,6 +293,11 @@ class CommuteAgent:
 
         if extra_context:
             lines.append(f"Additional context: {extra_context}")
+
+        if user_id:
+            lines.append(
+                f"\nUser ID: {user_id} — call get_user_history with this ID to personalise the recommendation."
+            )
 
         lines.append(
             "\nPlease check current weather, fetch route options, and give me a clear recommendation."

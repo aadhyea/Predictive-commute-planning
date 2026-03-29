@@ -1,6 +1,6 @@
 """
 Weather service using OpenWeatherMap API.
-Provides current conditions and commute impact assessment for Delhi.
+Provides current conditions and commute impact assessment for any city.
 """
 
 import logging
@@ -30,9 +30,6 @@ class WeatherService:
 
     def __init__(self):
         self._api_key = settings.OPENWEATHER_API_KEY
-        # Default to Delhi coordinates
-        self._default_lat = 28.6139
-        self._default_lon = 77.2090
 
     # ============================================
     # PUBLIC API
@@ -45,10 +42,10 @@ class WeatherService:
     ) -> Dict[str, Any]:
         """
         Fetch current weather and return a commute-ready summary.
-        Falls back to Delhi centre if no coordinates given.
+        Returns unknown conditions if coordinates are not provided.
         """
-        lat = lat or self._default_lat
-        lon = lon or self._default_lon
+        if lat is None or lon is None:
+            return self._unknown_conditions()
 
         raw = await self._fetch_current(lat, lon)
         if raw is None:
@@ -76,10 +73,10 @@ class WeatherService:
     ) -> list:
         """
         Return active weather alerts from the One Call API.
-        Empty list if none or on error.
+        Empty list if none, on error, or if coordinates are not provided.
         """
-        lat = lat or self._default_lat
-        lon = lon or self._default_lon
+        if lat is None or lon is None:
+            return []
 
         raw = await self._fetch_onecall(lat, lon)
         if raw is None:
@@ -156,7 +153,7 @@ class WeatherService:
 
         return {
             "timestamp":        datetime.utcnow().isoformat(),
-            "location":         raw.get("name", "Delhi"),
+            "location":         raw.get("name", ""),
             "condition":        weather.get("main", "Clear"),
             "description":      weather.get("description", ""),
             "icon":             weather.get("icon", ""),
@@ -228,7 +225,7 @@ class WeatherService:
 
         # --- Recommendation ---
         if delay_risk >= 0.7:
-            recommendation = "Leave 20-30 min earlier. Prefer Delhi Metro — more reliable than road transport."
+            recommendation = "Leave 20-30 min earlier. Prefer metro/rail — more reliable than road transport."
         elif delay_risk >= 0.4:
             recommendation = "Leave 10-15 min earlier. Metro preferred over road."
         elif delay_risk >= 0.2:
@@ -308,7 +305,7 @@ class WeatherService:
     def _unknown_conditions() -> Dict[str, Any]:
         return {
             "timestamp":       datetime.utcnow().isoformat(),
-            "location":        "Delhi",
+            "location":        "unknown",
             "condition":       "Unknown",
             "description":     "Weather data unavailable",
             "temperature_c":   None,
