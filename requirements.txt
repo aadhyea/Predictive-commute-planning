@@ -38,6 +38,7 @@ streamlit==1.29.0
 plotly==5.18.0
 folium==0.15.1
 streamlit-folium==0.15.1
+streamlit_searchbox
 
 # QR code generation
 qrcode[pil]>=7.4.2

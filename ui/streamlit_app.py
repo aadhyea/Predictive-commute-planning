@@ -636,6 +636,34 @@ h1 { font-size: 2rem !important; }
                         st.session_state["detected_city"] = (
                             chosen_city if chosen_city != "Auto-detect" else auto_city
                         )
+                        # Comfort advisory — infer metro line from recommended route steps
+                        try:
+                            from agent.tools import _get_comfort_advisory
+                            rec = result.recommended_route or {}
+                            metro_line = "Generic"
+                            for step in rec.get("steps", []):
+                                if step.get("mode") == "metro" and step.get("line"):
+                                    metro_line = step["line"]
+                                    break
+                            if rec.get("departure_time"):
+                                dep_iso = rec["departure_time"]
+                            elif result.leave_by:
+                                dep_iso = result.leave_by
+                            else:
+                                try:
+                                    dep_iso = (datetime.fromisoformat(required_arrival) - timedelta(minutes=45)).isoformat()
+                                except Exception:
+                                    dep_iso = required_arrival
+                            comfort_inp = {
+                                "lat": o_geo["lat"] if o_geo else None,
+                                "lon": o_geo["lng"] if o_geo else None,
+                                "metro_line": metro_line,
+                                "departure_time_iso": dep_iso,
+                            }
+                            comfort_data = run_async(_get_comfort_advisory(comfort_inp))
+                            st.session_state["comfort_advisory"] = comfort_data
+                        except Exception:
+                            st.session_state.pop("comfort_advisory", None)
                     except Exception as e:
                         st.error(f"Agent error: {e}")
                         st.session_state.pop("plan_result", None)
@@ -709,7 +737,66 @@ h1 { font-size: 2rem !important; }
             if result.tool_calls_made:
                 with st.expander("🔧 Tools used by agent", expanded=False):
                     st.write(" → ".join(result.tool_calls_made))
+                    
+            # ── Comfort Advisory (heat index + crowding + proactive alert) ──────
+            comfort = st.session_state.get("comfort_advisory")
+            if comfort:
+                st.divider()
+                st.markdown("### 🌡️ Comfort Advisory")
 
+                ca_col1, ca_col2 = st.columns(2)
+
+                with ca_col1:
+                    heat_cat   = comfort.get("heat_category", "comfortable")
+                    heat_index = comfort.get("heat_index_c", "—")
+                    heat_adv   = comfort.get("heat_advisory", "")
+                    heat_color = {
+                        "comfortable": "🟢",
+                        "warm":        "🟡",
+                        "hot":         "🟠",
+                        "dangerous":   "🔴",
+                    }.get(heat_cat, "⚪")
+                    st.metric(
+                        label=f"{heat_color} Heat Index",
+                        value=f"{heat_index}°C",
+                        help=heat_adv,
+                    )
+                    st.caption(heat_adv)
+
+                with ca_col2:
+                    crowd_lbl  = comfort.get("crowding_label", "unknown")
+                    crowd_occ  = comfort.get("crowding_occupancy", 0)
+                    metro_line = comfort.get("metro_line", "Metro")
+                    crowd_icon = {
+                        "empty":        "🟢",
+                        "moderate":     "🟡",
+                        "crowded":      "🟠",
+                        "very crowded": "🔴",
+                    }.get(crowd_lbl, "⚪")
+                    peak_badge = " (Peak)" if comfort.get("is_peak") else " (Off-peak)"
+                    st.metric(
+                        label=f"{crowd_icon} {metro_line} Crowding",
+                        value=f"{crowd_lbl.title()}{peak_badge}",
+                        help=f"{int(crowd_occ * 100)}% occupancy",
+                    )
+                    coach_tip = comfort.get("coach_tip", "")
+                    if coach_tip:
+                        st.caption(f"💡 {coach_tip}")
+
+                if reasoning := comfort.get("reasoning"):
+                    st.info(reasoning, icon="🤖")
+
+                if early := comfort.get("early_departure"):
+                    suggest_time = early.get("suggested_departure", "")
+                    reason_text  = early.get("reason", "")
+                    mins_saved   = early.get("minutes_saved", 0)
+                    st.warning(
+                        f"**Leave earlier — {suggest_time}** saves ~{mins_saved} min of crowding.  \n"
+                        f"{reason_text}",
+                        icon="⚡",
+                    )
+            st.divider()
+            
             # ── Save this commute ──────────────────────────────────────────────
             with st.expander("🔖 Save this commute", expanded=False):
                 if require_auth("saved commutes"):

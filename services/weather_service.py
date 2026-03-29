@@ -250,6 +250,54 @@ class WeatherService:
         return "none"
 
     # ============================================
+    # HEAT INDEX
+    # ============================================
+
+    @staticmethod
+    def compute_heat_index(temp_c: float, humidity_pct: float) -> Dict[str, Any]:
+        """
+        Steadman formula (simplified) for apparent temperature.
+        Valid for temp >= 27°C; below that returns temp_c directly.
+
+        Returns:
+            heat_index_c  — apparent temperature
+            category      — 'comfortable' | 'warm' | 'hot' | 'dangerous'
+            advisory      — one-line commute advice
+        """
+        if temp_c < 27:
+            hi_c = temp_c
+        else:
+            T = temp_c
+            R = humidity_pct
+            hi_c = (
+                -8.78469475556
+                + 1.61139411   * T
+                + 2.33854883889 * (R / 100)
+                - 0.14611605   * T * (R / 100)
+                - 0.012308094  * T ** 2
+                - 0.0164248277778 * (R / 100) ** 2
+                + 0.002211732  * T ** 2 * (R / 100)
+                + 0.00072546   * T * (R / 100) ** 2
+                - 0.000003582  * T ** 2 * (R / 100) ** 2
+            )
+        hi_c = round(hi_c, 1)
+
+        if hi_c < 27:
+            category = "comfortable"
+            advisory = "Comfortable outdoor conditions."
+        elif hi_c < 32:
+            category = "warm"
+            advisory = "Warm — stay hydrated during walking segments."
+        elif hi_c < 41:
+            category = "hot"
+            advisory = "Hot — limit outdoor exposure, prefer shaded/covered paths."
+        else:
+            category = "dangerous"
+            advisory = "Dangerous heat — minimise walking outdoors, use enclosed transport."
+
+        return {"heat_index_c": hi_c, "category": category, "advisory": advisory}
+
+    # ============================================
     # FALLBACKS
     # ============================================
 
