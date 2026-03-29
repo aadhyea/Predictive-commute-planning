@@ -20,7 +20,8 @@ from geopy.distance import geodesic
 from config import settings
 from maps.google_maps_client import maps_client
 from services.metro_service import delhi_metro, find_nearest_metro_any_city, _is_delhi
-from services.weather_service import weather_service
+from services.weather_service import weather_service, WeatherService
+from services.crowding_service import estimate_crowding
 
 logger = logging.getLogger(__name__)
 
@@ -189,6 +190,16 @@ class HybridRouteService:
         weather_risk    = commute_impact.get("delay_risk", 0.0)
         prefer_metro    = commute_impact.get("prefer_metro", False)
 
+        # Compute heat index and crowding for scoring penalties
+        temp_c       = weather_data.get("temperature_c") or 25.0
+        humidity_pct = weather_data.get("humidity_pct") or 50
+        heat_info    = WeatherService.compute_heat_index(temp_c, humidity_pct)
+        heat_category = heat_info["category"]
+
+        # Use a generic crowding estimate at departure time (no specific line yet)
+        crowding_info    = estimate_crowding("Generic", departure_time)
+        crowding_occupancy = crowding_info["occupancy"]
+
         options: List[RouteOption] = []
 
         # --- Option 1: Google Maps transit (most accurate for real world)
@@ -215,8 +226,12 @@ class HybridRouteService:
             if hybrid:
                 options.append(hybrid)
 
-        # Score & rank
-        options = self._score_and_rank(options, user_prefs, prefer_metro, required_arrival, departure_time)
+        # Score & rank (with heat + crowding comfort penalties)
+        options = self._score_and_rank(
+            options, user_prefs, prefer_metro, required_arrival, departure_time,
+            heat_category=heat_category,
+            crowding_occupancy=crowding_occupancy,
+        )
 
         # Trim to configured max
         return options[:settings.MAX_ROUTES_TO_COMPARE]
@@ -542,6 +557,8 @@ class HybridRouteService:
         prefer_metro: bool,
         required_arrival: Optional[datetime],
         departure_time: datetime,
+        heat_category: str = "comfortable",
+        crowding_occupancy: float = 0.0,
     ) -> List[RouteOption]:
         if not options:
             return []
@@ -564,6 +581,29 @@ class HybridRouteService:
             if prefer_metro and "metro" in opt.label.lower():
                 certainty *= 1.15
 
+            # --- Session 5: Heat + crowding comfort penalties ---
+            # Penalise routes with long outdoor walk segments when heat is dangerous
+            if heat_category == "dangerous":
+                outdoor_walk_km = sum(
+                    s.distance_km for s in opt.steps
+                    if s.mode == "walk" and s.distance_km > 0.5
+                )
+                if outdoor_walk_km > 0:
+                    comfort -= 0.3   # each dangerous-heat walk leg hurts comfort
+                    if "metro" not in opt.label.lower():
+                        opt.notes.append(
+                            f"Dangerous heat ({heat_category}) — walk segment of "
+                            f"{outdoor_walk_km:.1f} km not recommended."
+                        )
+
+            # Penalise metro options when crowding is very high
+            if crowding_occupancy > 0.85 and "metro" in opt.label.lower():
+                comfort -= 0.2   # crowded but still viable — not eliminated
+                opt.notes.append(
+                    f"Metro is very crowded ({int(crowding_occupancy*100)}% occupancy). "
+                    "Consider an earlier departure to avoid the rush."
+                )
+
             # On-time penalty: if required_arrival given, check buffer
             if required_arrival:
                 buffer_min = (required_arrival - opt.arrival_time).total_seconds() / 60
@@ -575,7 +615,7 @@ class HybridRouteService:
             score = (
                 WEIGHT_DURATION  * dur_norm  +
                 WEIGHT_COST      * cost_norm  +
-                WEIGHT_COMFORT   * min(comfort, 1.0) +
+                WEIGHT_COMFORT   * min(max(comfort, 0.0), 1.0) +
                 WEIGHT_CERTAINTY * min(certainty, 1.0)
             )
 

@@ -17,6 +17,7 @@ from maps.google_maps_client import maps_client
 from services.metro_service import delhi_metro
 from services.weather_service import weather_service
 from services.hybrid_route_service import hybrid_route_service
+from services.crowding_service import estimate_crowding, get_early_departure_suggestion
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +129,31 @@ GEMINI_TOOLS = [
             ),
         ),
 
+        types.FunctionDeclaration(
+            name="get_comfort_advisory",
+            description=(
+                "Get a combined heat index + metro crowding advisory for the planned commute. "
+                "Call this after get_weather and get_route_options to assess passenger comfort. "
+                "Returns heat category, crowding occupancy, a coach boarding tip, and — when the "
+                "departure falls in a crowded peak window — a proactive suggestion to leave earlier "
+                "with the time and reasoning."
+            ),
+            parameters=S(
+                type=T.OBJECT,
+                properties={
+                    "lat": S(type=T.NUMBER, description="Origin latitude for weather lookup"),
+                    "lon": S(type=T.NUMBER, description="Origin longitude for weather lookup"),
+                    "metro_line": S(type=T.STRING, description=(
+                        "Metro line name used in the recommended route, "
+                        "e.g. 'Yellow Line', 'Blue Line'. Use 'Generic' if unknown."
+                    )),
+                    "departure_time_iso": S(type=T.STRING, description=(
+                        "Planned departure time in ISO 8601 format. Defaults to now if omitted."
+                    )),
+                },
+            ),
+        ),
+
     ])
 ]
 
@@ -159,6 +185,9 @@ async def execute_tool(tool_name: str, tool_input: Dict[str, Any]) -> str:
 
         elif tool_name == "calculate_leave_time":
             result = _calculate_leave_time(tool_input)
+
+        elif tool_name == "get_comfort_advisory":
+            result = await _get_comfort_advisory(tool_input)
 
         else:
             result = {"error": f"Unknown tool: {tool_name}"}
@@ -308,6 +337,106 @@ async def _find_nearest_metro(inp: Dict) -> Dict:
             f"&destination={station.lat},{station.lng}"
             f"&travelmode=walking"
         ),
+    }
+
+
+async def _get_comfort_advisory(inp: Dict) -> Dict:
+    """
+    Combines heat index (from live weather) + metro crowding model into a single
+    comfort advisory. Also emits a proactive early-departure suggestion when the
+    departure time falls in a heavily crowded peak window.
+    """
+    lat  = inp.get("lat")
+    lon  = inp.get("lon")
+    line = inp.get("metro_line", "Generic")
+
+    dep_str = inp.get("departure_time_iso")
+    try:
+        departure = datetime.fromisoformat(dep_str) if dep_str else datetime.now()
+    except (ValueError, TypeError):
+        departure = datetime.now()
+
+    # --- Weather / heat index ---
+    conditions = await weather_service.get_current_conditions(lat=lat, lon=lon)
+    temp_c     = conditions.get("temperature_c") or 25.0
+    humidity   = conditions.get("humidity_pct")  or 50
+
+    from services.weather_service import WeatherService
+    heat = WeatherService.compute_heat_index(temp_c, humidity)
+
+    # --- Crowding ---
+    crowding = estimate_crowding(line, departure)
+
+    # --- Early-departure suggestion ---
+    early = get_early_departure_suggestion(line, departure, lead_minutes=30)
+
+    # --- Synthesise reasoning ---
+    heat_c    = heat["heat_index_c"]
+    heat_cat  = heat["category"]
+    crowd_lbl = crowding["label"]
+    crowd_occ = crowding["occupancy"]
+
+    # Build a plain-language synthesis
+    parts = []
+
+    if heat_cat in ("hot", "dangerous"):
+        parts.append(
+            f"Heat index is {heat_c}°C ({heat_cat}) — minimise outdoor walking segments."
+        )
+    else:
+        parts.append(f"Heat index is {heat_c}°C — outdoor conditions are {heat_cat}.")
+
+    if crowding["is_peak"]:
+        parts.append(
+            f"{line} is {crowd_lbl} right now ({int(crowd_occ*100)}% occupancy). "
+            f"{crowding['coach_tip']}"
+        )
+    else:
+        parts.append(
+            f"{line} is {crowd_lbl} (off-peak, {int(crowd_occ*100)}% occupancy). "
+            "Good time to travel."
+        )
+
+    if early:
+        parts.append(f"Proactive tip: {early['reason']}")
+
+    # Mode recommendation
+    if heat_cat == "dangerous" and crowd_occ > 0.85:
+        mode_rec = "cab"
+        rec_reason = (
+            "Dangerous heat + very crowded metro — enclosed cab avoids both risks."
+        )
+    elif heat_cat == "dangerous":
+        mode_rec = "metro"
+        rec_reason = (
+            "Dangerous heat — metro is air-conditioned; minimise walk segments."
+        )
+    elif crowd_occ > 0.85 and heat_cat in ("hot", "dangerous"):
+        mode_rec = "metro"
+        rec_reason = (
+            "Despite crowding, metro stays cooler than outdoor cab waiting. "
+            "Use the coach tip above."
+        )
+    else:
+        mode_rec = "metro"
+        rec_reason = "Metro is the most reliable and comfortable option given current conditions."
+
+    return {
+        "heat_index_c":       heat["heat_index_c"],
+        "heat_category":      heat["category"],
+        "heat_advisory":      heat["advisory"],
+        "temperature_c":      temp_c,
+        "humidity_pct":       humidity,
+        "metro_line":         line,
+        "crowding_occupancy": crowding["occupancy"],
+        "crowding_label":     crowding["label"],
+        "is_peak":            crowding["is_peak"],
+        "peak_type":          crowding["peak_type"],
+        "coach_tip":          crowding["coach_tip"],
+        "early_departure":    early,
+        "recommended_mode":   mode_rec,
+        "reasoning":          " ".join(parts),
+        "rec_reason":         rec_reason,
     }
 
 
