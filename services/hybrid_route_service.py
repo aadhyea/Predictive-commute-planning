@@ -146,6 +146,19 @@ class HybridRouteService:
         )
     """
 
+    def __init__(self):
+        # Populated by plan_commute() before the agent loop; cleared after.
+        # None = guest or no history — scoring runs with neutral weights.
+        self._user_patterns: Optional[Dict[str, Any]] = None
+
+    def set_user_patterns(self, patterns: Optional[Dict[str, Any]]) -> None:
+        """
+        Set detected user patterns before the agent loop starts so that
+        _score_and_rank() can apply personalised weight adjustments.
+        Always call set_user_patterns(None) after the loop — use try/finally.
+        """
+        self._user_patterns = patterns
+
     async def get_route_options(
         self,
         origin: str,
@@ -215,8 +228,11 @@ class HybridRouteService:
             if hybrid:
                 options.append(hybrid)
 
-        # Score & rank
-        options = self._score_and_rank(options, user_prefs, prefer_metro, required_arrival, departure_time)
+        # Score & rank (pass patterns set by plan_commute before the agent loop)
+        options = self._score_and_rank(
+            options, user_prefs, prefer_metro, required_arrival, departure_time,
+            user_patterns=self._user_patterns,
+        )
 
         # Trim to configured max
         return options[:settings.MAX_ROUTES_TO_COMPARE]
@@ -542,9 +558,21 @@ class HybridRouteService:
         prefer_metro: bool,
         required_arrival: Optional[datetime],
         departure_time: datetime,
+        user_patterns: Optional[Dict[str, Any]] = None,
     ) -> List[RouteOption]:
         if not options:
             return []
+
+        # Unpack pattern signals — explicit None check, not just falsy,
+        # so an empty-but-present patterns dict doesn't silently skip.
+        if user_patterns is None:
+            pattern_preferred_mode = None
+            pattern_peak_cab       = False
+        else:
+            pattern_preferred_mode = user_patterns.get("preferred_mode")
+            pattern_peak_cab       = user_patterns.get("peak_cab_usage", False)
+
+        is_peak_now = self._is_peak(departure_time)
 
         # Normalise durations and costs for relative scoring
         durations = [o.total_duration_minutes for o in options]
@@ -558,13 +586,32 @@ class HybridRouteService:
             certainty = opt.on_time_probability
             comfort   = opt.comfort_score
 
-            # User preference adjustments
+            # ── Standard user preference adjustments ─────────────────────────
             if user_prefs.get("prefer_comfort_over_speed"):
                 comfort *= 1.2
             if prefer_metro and "metro" in opt.label.lower():
                 certainty *= 1.15
 
-            # On-time penalty: if required_arrival given, check buffer
+            # ── Pattern-based weight adjustments ─────────────────────────────
+            # Boost comfort for the mode the user historically prefers.
+            # Cap at +0.1 so we nudge rather than override objective scores.
+            if pattern_preferred_mode:
+                is_metro_opt = "metro" in opt.label.lower()
+                is_cab_opt   = "cab"   in opt.label.lower()
+
+                if pattern_preferred_mode == "metro_hybrid" and is_metro_opt:
+                    comfort += 0.1
+                elif pattern_preferred_mode == "cab" and is_cab_opt:
+                    comfort += 0.1
+                elif pattern_preferred_mode == "transit" and not is_metro_opt and not is_cab_opt:
+                    comfort += 0.1
+
+            # If user historically hails cabs at peak and it's peak now, give
+            # cab a small certainty bump — they've proven it works for them.
+            if pattern_peak_cab and is_peak_now and "cab" in opt.label.lower():
+                certainty += 0.05
+
+            # ── On-time penalty: if required_arrival given, check buffer ──────
             if required_arrival:
                 buffer_min = (required_arrival - opt.arrival_time).total_seconds() / 60
                 if buffer_min < 0:
@@ -579,8 +626,9 @@ class HybridRouteService:
                 WEIGHT_CERTAINTY * min(certainty, 1.0)
             )
 
-            opt.score                = round(min(score, 1.0), 3)
-            opt.on_time_probability  = round(min(certainty, 1.0), 3)
+            opt.score               = round(min(score, 1.0), 3)
+            opt.on_time_probability = round(min(certainty, 1.0), 3)
+            opt.comfort_score       = round(min(comfort, 1.0), 3)
 
         options.sort(key=lambda o: o.score, reverse=True)
         return options
