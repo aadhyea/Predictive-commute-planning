@@ -147,6 +147,19 @@ class HybridRouteService:
         )
     """
 
+    def __init__(self):
+        # Populated by plan_commute() before the agent loop; cleared after.
+        # None = guest or no history — scoring runs with neutral weights.
+        self._user_patterns: Optional[Dict[str, Any]] = None
+
+    def set_user_patterns(self, patterns: Optional[Dict[str, Any]]) -> None:
+        """
+        Set detected user patterns before the agent loop starts so that
+        _score_and_rank() can apply personalised weight adjustments.
+        Always call set_user_patterns(None) after the loop — use try/finally.
+        """
+        self._user_patterns = patterns
+
     async def get_route_options(
         self,
         origin: str,
@@ -196,10 +209,6 @@ class HybridRouteService:
         heat_info    = WeatherService.compute_heat_index(temp_c, humidity_pct)
         heat_category = heat_info["category"]
 
-        # Use a generic crowding estimate at departure time (no specific line yet)
-        crowding_info    = estimate_crowding("Generic", departure_time)
-        crowding_occupancy = crowding_info["occupancy"]
-
         options: List[RouteOption] = []
 
         # --- Option 1: Google Maps transit (most accurate for real world)
@@ -230,7 +239,7 @@ class HybridRouteService:
         options = self._score_and_rank(
             options, user_prefs, prefer_metro, required_arrival, departure_time,
             heat_category=heat_category,
-            crowding_occupancy=crowding_occupancy,
+            user_patterns=self._user_patterns,
         )
 
         # Trim to configured max
@@ -327,7 +336,7 @@ class HybridRouteService:
         level    = traffic.get("traffic_level", "moderate")
 
         # Estimate distance from duration (rough: 30 km/h average in traffic)
-        dist_km  = max(1.0, (dur_s / 3600) * 30)
+        dist_km  = max(1.0, (dur_s / 3600) * CAB_SPEED_KMH)
         is_peak  = self._is_peak(departure_time)
         surge    = CAB_SURGE_PEAK if is_peak else 1.0
         cost     = round((CAB_BASE_FARE_RS + dist_km * CAB_PER_KM_RS) * surge)
@@ -396,6 +405,10 @@ class HybridRouteService:
                         break
                     if "administrative_area_level_2" in comp["types"]:
                         city = comp["long_name"]
+
+            if city == "unknown":
+                logger.warning("Could not detect city from origin geocode; skipping metro hybrid.")
+                return None
 
             nearest_origin = await find_nearest_metro_any_city(city, olat, olng)
             nearest_dest   = await find_nearest_metro_any_city(city, dlat, dlng)
@@ -510,9 +523,8 @@ class HybridRouteService:
         direction = "to" if is_first else "from"
         endpoint  = f"{dest_name} metro station" if is_first else "destination"
 
-        # Bad weather nudge: upgrade walk → auto if rainy/foggy and > 0.5 km
-        effective_dist = dist_km
-        forced_auto    = weather_risk >= 0.5 and dist_km > 0.5
+        # Bad weather nudge: upgrade walk → auto if rainy/foggy and distance > 0.5 km
+        forced_auto = weather_risk >= 0.5 and dist_km > 0.5
 
         if dist_km < WALK_THRESHOLD_KM and not forced_auto:
             dur_min = max(1, round(dist_km / WALK_SPEED_KMH * 60))
@@ -524,14 +536,14 @@ class HybridRouteService:
                 cost_rupees=     0,
             )
 
-        if dist_km <= AUTO_THRESHOLD_KM or forced_auto:
-            dur_min = max(2, round(effective_dist / AUTO_SPEED_KMH * 60))
-            cost    = round((AUTO_BASE_FARE_RS + effective_dist * AUTO_PER_KM_RS) * (surge if is_peak else 1.0))
+        if dist_km <= AUTO_THRESHOLD_KM:
+            dur_min = max(2, round(dist_km / AUTO_SPEED_KMH * 60))
+            cost    = round((AUTO_BASE_FARE_RS + dist_km * AUTO_PER_KM_RS) * (surge if is_peak else 1.0))
             return RouteStep(
                 mode=            "auto",
-                instruction=     f"Auto-rickshaw {direction} {endpoint} ({effective_dist:.1f} km)",
+                instruction=     f"Auto-rickshaw {direction} {endpoint} ({dist_km:.1f} km)",
                 duration_minutes=dur_min,
-                distance_km=     effective_dist,
+                distance_km=     dist_km,
                 cost_rupees=     cost,
             )
 
@@ -558,10 +570,21 @@ class HybridRouteService:
         required_arrival: Optional[datetime],
         departure_time: datetime,
         heat_category: str = "comfortable",
-        crowding_occupancy: float = 0.0,
+        user_patterns: Optional[Dict[str, Any]] = None,
     ) -> List[RouteOption]:
         if not options:
             return []
+
+        # Unpack pattern signals — explicit None check, not just falsy,
+        # so an empty-but-present patterns dict doesn't silently skip.
+        if user_patterns is None:
+            pattern_preferred_mode = None
+            pattern_peak_cab       = False
+        else:
+            pattern_preferred_mode = user_patterns.get("preferred_mode")
+            pattern_peak_cab       = user_patterns.get("peak_cab_usage", False)
+
+        is_peak_now = self._is_peak(departure_time)
 
         # Normalise durations and costs for relative scoring
         durations = [o.total_duration_minutes for o in options]
@@ -575,7 +598,7 @@ class HybridRouteService:
             certainty = opt.on_time_probability
             comfort   = opt.comfort_score
 
-            # User preference adjustments
+            # ── Standard user preference adjustments ─────────────────────────
             if user_prefs.get("prefer_comfort_over_speed"):
                 comfort *= 1.2
             if prefer_metro and "metro" in opt.label.lower():
@@ -596,15 +619,39 @@ class HybridRouteService:
                             f"{outdoor_walk_km:.1f} km not recommended."
                         )
 
-            # Penalise metro options when crowding is very high
-            if crowding_occupancy > 0.85 and "metro" in opt.label.lower():
-                comfort -= 0.2   # crowded but still viable — not eliminated
-                opt.notes.append(
-                    f"Metro is very crowded ({int(crowding_occupancy*100)}% occupancy). "
-                    "Consider an earlier departure to avoid the rush."
-                )
+            # Penalise metro options when crowding is very high (per actual line)
+            if "metro" in opt.label.lower():
+                metro_step = next((s for s in opt.steps if s.mode == "metro"), None)
+                line_name = (metro_step.line or "Generic") if metro_step else "Generic"  # "Generic" → Namma Metro baseline
+                route_crowding = estimate_crowding(line_name, departure_time)["occupancy"]
+                if route_crowding > 0.85:
+                    comfort -= 0.2   # crowded but still viable — not eliminated
+                    opt.notes.append(
+                        f"Metro is very crowded ({int(route_crowding*100)}% occupancy). "
+                        "Consider an earlier departure to avoid the rush."
+                    )
 
             # On-time penalty: if required_arrival given, check buffer
+            # ── Pattern-based weight adjustments ─────────────────────────────
+            # Boost comfort for the mode the user historically prefers.
+            # Cap at +0.1 so we nudge rather than override objective scores.
+            if pattern_preferred_mode:
+                is_metro_opt = "metro" in opt.label.lower()
+                is_cab_opt   = "cab"   in opt.label.lower()
+
+                if pattern_preferred_mode == "metro_hybrid" and is_metro_opt:
+                    comfort += 0.1
+                elif pattern_preferred_mode == "cab" and is_cab_opt:
+                    comfort += 0.1
+                elif pattern_preferred_mode == "transit" and not is_metro_opt and not is_cab_opt:
+                    comfort += 0.1
+
+            # If user historically hails cabs at peak and it's peak now, give
+            # cab a small certainty bump — they've proven it works for them.
+            if pattern_peak_cab and is_peak_now and "cab" in opt.label.lower():
+                certainty += 0.05
+
+            # ── On-time penalty: if required_arrival given, check buffer ──────
             if required_arrival:
                 buffer_min = (required_arrival - opt.arrival_time).total_seconds() / 60
                 if buffer_min < 0:
@@ -619,8 +666,9 @@ class HybridRouteService:
                 WEIGHT_CERTAINTY * min(certainty, 1.0)
             )
 
-            opt.score                = round(min(score, 1.0), 3)
-            opt.on_time_probability  = round(min(certainty, 1.0), 3)
+            opt.score               = round(min(score, 1.0), 3)
+            opt.on_time_probability = round(min(certainty, 1.0), 3)
+            opt.comfort_score       = round(min(comfort, 1.0), 3)
 
         options.sort(key=lambda o: o.score, reverse=True)
         return options
