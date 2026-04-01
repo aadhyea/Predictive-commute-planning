@@ -540,7 +540,7 @@ h1 { font-size: 2rem !important; }
 
 
     # ── TABS ──────────────────────────────────────────────────────────────────
-    tab_plan, tab_chat = st.tabs(["🗺️  Plan Commute", "💬  Chat with Agent"])
+    tab_plan, tab_commutes, tab_chat = st.tabs(["🗺️  Plan Commute", "📊  My Commutes", "💬  Chat with Agent"])
 
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -902,7 +902,81 @@ h1 { font-size: 2rem !important; }
 
 
     # ══════════════════════════════════════════════════════════════════════════
-    # TAB 2 — CHAT
+    # TAB 2 — MY COMMUTES
+    # ══════════════════════════════════════════════════════════════════════════
+    with tab_commutes:
+        if not require_auth("My Commutes"):
+            pass
+        else:
+            _mc_user = get_current_user()
+            _mc_trips = get_client().get_trip_history(_mc_user.id, limit=50)
+
+            if len(_mc_trips) < 5:
+                st.info(
+                    "Plan a few more commutes to unlock insights. "
+                    f"({len(_mc_trips)}/5 trips logged)",
+                    icon="📊",
+                )
+            else:
+                _mc_month = datetime.now().strftime("%Y-%m")
+                _mc_spend = get_client().get_monthly_spend(_mc_user.id, _mc_month)
+
+                from services.memory_service import detect_savings_opportunities
+                _mc_opps = detect_savings_opportunities(_mc_spend, _mc_trips)
+
+                # ── Agent insight card ────────────────────────────────────────
+                _mc_total   = _mc_spend.get("total_spent", 0)
+                _mc_saving  = sum(o["saving"] for o in _mc_opps[:3])
+                _mc_month_label = datetime.now().strftime("%B %Y")
+
+                if _mc_saving > 0 and _mc_opps:
+                    st.success(
+                        f"**{_mc_month_label}:** You've spent ₹{_mc_total} on commutes. "
+                        f"Switching to metro on your {min(3, len(_mc_opps))} most frequent routes "
+                        f"would save **₹{_mc_saving}/month**.",
+                        icon="💡",
+                    )
+                elif _mc_total > 0:
+                    st.info(
+                        f"**{_mc_month_label}:** You've spent ₹{_mc_total} on commutes "
+                        f"across {_mc_spend.get('trip_count', 0)} trips.",
+                        icon="💡",
+                    )
+                else:
+                    st.info("No spend recorded for this month yet.", icon="💡")
+
+                # ── Monthly spend bar chart ───────────────────────────────────
+                _mc_by_mode = _mc_spend.get("by_mode", {})
+                if _mc_by_mode:
+                    st.markdown(f"### Monthly Spend — {_mc_month_label}")
+                    import pandas as pd
+                    _mc_chart = pd.DataFrame({
+                        "Mode":      list(_mc_by_mode.keys()),
+                        "Spend (₹)": list(_mc_by_mode.values()),
+                    }).set_index("Mode")
+                    st.bar_chart(_mc_chart, use_container_width=True, height=260)
+
+                    _mc_cols = st.columns(len(_mc_by_mode))
+                    for _col, (_mode, _amt) in zip(_mc_cols, _mc_by_mode.items()):
+                        _col.metric(f"{_mode.title()} spend", f"₹{_amt}")
+
+                st.divider()
+
+                # ── Savings opportunities table ───────────────────────────────
+                if _mc_opps:
+                    st.markdown("### 💰 Savings Opportunities")
+                    st.caption("Trips where you took a cab but metro was available or cheaper.")
+                    import pandas as pd
+                    _opp_df = pd.DataFrame(_mc_opps[:10])[
+                        ["date", "route", "cab_cost", "metro_cost", "saving"]
+                    ]
+                    _opp_df.columns = ["Date", "Route", "Cab Cost (₹)", "Metro Cost (₹)", "Saving (₹)"]
+                    st.dataframe(_opp_df, use_container_width=True, hide_index=True)
+                else:
+                    st.success("No savings opportunities found — you're already commuting efficiently!", icon="✅")
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # TAB 3 — CHAT
     # ══════════════════════════════════════════════════════════════════════════
     with tab_chat:
         st.markdown("Ask anything about your commute — the agent has access to real-time weather, routes, and metro data.")

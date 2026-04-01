@@ -2,6 +2,7 @@
 Supabase client for Delhi Commute Agent - all CRUD operations
 """
 
+import calendar
 import logging
 from typing import Optional, List, Dict, Any
 from datetime import datetime
@@ -75,6 +76,53 @@ class SupabaseClient:
         except Exception as e:
             logger.error(f"Failed to log trip: {e}")
             return False
+
+    def get_monthly_spend(self, user_id: str, month: str) -> Dict[str, Any]:
+        """Aggregate trip costs for a user in a given month.
+
+        Args:
+            user_id: The user's UUID
+            month: Month in "YYYY-MM" format, e.g. "2025-01"
+
+        Returns:
+            {total_spent, by_mode, trip_count, avg_trip_cost, month}
+        """
+        try:
+            year_str, mon_str = month.split("-")
+            year, mon = int(year_str), int(mon_str)
+            last_day = calendar.monthrange(year, mon)[1]
+            start_dt = f"{month}-01T00:00:00"
+            end_dt   = f"{month}-{last_day:02d}T23:59:59"
+
+            resp = (
+                self.client.table("trips")
+                .select("mode,cost_inr,planned_at")
+                .eq("user_id", user_id)
+                .gte("planned_at", start_dt)
+                .lte("planned_at", end_dt)
+                .execute()
+            )
+            trips = resp.data or []
+
+            total_spent = sum(t.get("cost_inr", 0) for t in trips)
+            trip_count  = len(trips)
+            avg_trip_cost = round(total_spent / trip_count, 1) if trip_count else 0
+
+            by_mode: Dict[str, int] = {}
+            for t in trips:
+                mode = t.get("mode", "unknown")
+                by_mode[mode] = by_mode.get(mode, 0) + (t.get("cost_inr") or 0)
+
+            return {
+                "total_spent":    total_spent,
+                "by_mode":        by_mode,
+                "trip_count":     trip_count,
+                "avg_trip_cost":  avg_trip_cost,
+                "month":          month,
+            }
+        except Exception as e:
+            logger.error(f"Failed to get monthly spend: {e}")
+            return {"total_spent": 0, "by_mode": {}, "trip_count": 0, "avg_trip_cost": 0, "month": month}
 
     def get_trip_history(self, user_id: str, limit: int = 10) -> List[Dict[str, Any]]:
         """Return the most recent trips for a user."""

@@ -360,6 +360,11 @@ class CommuteAgent:
         if risk_score >= 0.85:
             urgency = "CRITICAL"
 
+        # Proactive cost nudge: if recommended route is cab but user has metro history on same O→D
+        cost_nudge = _build_cost_nudge(routes[0] if routes else None, tool_results, origin, destination)
+        if cost_nudge:
+            explanation = explanation + f"\n\n{cost_nudge}"
+
         return CommuteRecommendation(
             explanation=       explanation,
             recommended_route= routes[0] if routes else None,
@@ -393,3 +398,56 @@ class CommuteAgent:
             f"&drop_name={quote(destination)}"
             f"&utm_source=commuteagent"
         )
+
+
+# ── Standalone helper (not a method) ─────────────────────────────────────────
+
+def _route_key(location: str) -> str:
+    return location.lower().strip().split(",")[0].strip()
+
+
+def _build_cost_nudge(
+    recommended: Optional[Dict[str, Any]],
+    tool_results: List[Dict],
+    origin: str,
+    destination: str,
+) -> Optional[str]:
+    """Return a cost-comparison note when a cab is recommended but metro history exists."""
+    if not recommended:
+        return None
+    label = (recommended.get("label") or "").lower()
+    if "cab" not in label:
+        return None
+
+    cab_cost = recommended.get("total_cost_rupees")
+    if not cab_cost:
+        return None
+
+    # Extract trip history from tool results
+    past_trips: List[Dict] = []
+    for tr in tool_results:
+        if tr.get("name") == "get_user_history":
+            past_trips = tr.get("result", {}).get("trips", [])
+            break
+
+    if not past_trips:
+        return None
+
+    o_key = _route_key(origin)
+    d_key = _route_key(destination)
+
+    for trip in past_trips:
+        if trip.get("mode") not in ("metro", "metro_hybrid", "transit"):
+            continue
+        if _route_key(trip.get("origin", "")) != o_key:
+            continue
+        if _route_key(trip.get("destination", "")) != d_key:
+            continue
+        metro_cost = trip.get("cost_inr")
+        if metro_cost:
+            return (
+                f"Note: You've taken metro on this route before (₹{metro_cost}). "
+                f"Today's cab option costs ₹{cab_cost}."
+            )
+
+    return None
