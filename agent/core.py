@@ -26,7 +26,7 @@ from google import genai
 from google.genai import types
 
 from config import settings
-from agent.prompts import COMMUTE_AGENT_SYSTEM_PROMPT
+from agent.prompts import COMMUTE_AGENT_SYSTEM_PROMPT, HINDI_LANGUAGE_INSTRUCTION
 from agent.tools import GEMINI_TOOLS, execute_tool
 from maps.google_maps_client import maps_client
 
@@ -59,6 +59,8 @@ class CommuteRecommendation:
     ola_link: Optional[str] = None
 
     tool_calls_made: List[str] = field(default_factory=list)
+    # Each entry: {"name": str, "summary": str}  — shown in the reasoning trace UI
+    tool_trace: List[Dict[str, str]] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -73,6 +75,7 @@ class CommuteRecommendation:
             "uber_link":          self.uber_link,
             "ola_link":           self.ola_link,
             "tool_calls_made":    self.tool_calls_made,
+            "tool_trace":         self.tool_trace,
         }
 
 
@@ -87,8 +90,13 @@ class CommuteAgent:
 
     def __init__(self):
         self._client = genai.Client(api_key=settings.GEMINI_API_KEY)
-        self._config = types.GenerateContentConfig(
-            system_instruction=COMMUTE_AGENT_SYSTEM_PROMPT,
+
+    def _make_config(self, language: Optional[str] = None) -> types.GenerateContentConfig:
+        system_instruction = COMMUTE_AGENT_SYSTEM_PROMPT
+        if language and language.lower().startswith("hi"):
+            system_instruction = system_instruction + "\n\n" + HINDI_LANGUAGE_INSTRUCTION
+        return types.GenerateContentConfig(
+            system_instruction=system_instruction,
             tools=GEMINI_TOOLS,
             max_output_tokens=MAX_TOKENS,
         )
@@ -102,6 +110,7 @@ class CommuteAgent:
         user_prefs: Optional[Dict[str, Any]] = None,
         extra_context: Optional[str] = None,
         user_id: Optional[str] = None,
+        language: Optional[str] = None,
     ) -> CommuteRecommendation:
         user_prefs    = user_prefs or {}
         departure_str = departure_time or datetime.now().isoformat()
@@ -125,17 +134,20 @@ class CommuteAgent:
             origin_lng=origin_lng,
         )
 
+        config = self._make_config(language)
+
         contents: List[types.Content] = [
             types.Content(role="user", parts=[types.Part(text=user_message)])
         ]
         tool_calls_made: List[str] = []
         tool_results_store: List[Dict] = []   # raw dicts for result extraction
+        failed_tools: List[str] = []          # tools that returned errors/empty
 
         for round_num in range(MAX_TOOL_ROUNDS):
             response = self._client.models.generate_content(
                 model=MODEL,
                 contents=contents,
-                config=self._config,
+                config=config,
             )
 
             candidate = response.candidates[0]
@@ -155,6 +167,7 @@ class CommuteAgent:
                     explanation=    final_text,
                     tool_results=   tool_results_store,
                     tool_calls_made=tool_calls_made,
+                    failed_tools=   failed_tools,
                     origin=         origin,
                     destination=    destination,
                 )
@@ -173,11 +186,15 @@ class CommuteAgent:
                 result_str = await execute_tool(fn_name, fn_args)
                 logger.debug(f"Tool result ({fn_name}): {result_str[:200]}")
 
-                # Store for result extraction later
+                # Store for result extraction later; track failures
                 try:
-                    tool_results_store.append({"name": fn_name, "result": json.loads(result_str)})
+                    parsed = json.loads(result_str)
+                    tool_results_store.append({"name": fn_name, "result": parsed})
+                    if "error" in parsed or not parsed:
+                        failed_tools.append(fn_name)
                 except json.JSONDecodeError:
                     tool_results_store.append({"name": fn_name, "result": {}})
+                    failed_tools.append(fn_name)
 
                 fn_response_parts.append(
                     types.Part(
@@ -199,6 +216,7 @@ class CommuteAgent:
             explanation=    final_text or "Agent loop limit reached.",
             tool_results=   tool_results_store,
             tool_calls_made=tool_calls_made,
+            failed_tools=   failed_tools,
             origin=         origin,
             destination=    destination,
         )
@@ -207,12 +225,14 @@ class CommuteAgent:
     # FREE-FORM CHAT
     # ============================================
 
-    async def chat(self, user_message: str, history: Optional[List[Dict]] = None) -> str:
+    async def chat(self, user_message: str, history: Optional[List[Dict]] = None,
+                   language: Optional[str] = None) -> str:
         """
         Free-form chat with the commute agent.
         `history` is a list of {"role": "user"|"model", "text": "..."} dicts.
         Returns the agent's text reply.
         """
+        config   = self._make_config(language)
         contents: List[types.Content] = []
 
         for h in (history or []):
@@ -228,7 +248,7 @@ class CommuteAgent:
             response = self._client.models.generate_content(
                 model=MODEL,
                 contents=contents,
-                config=self._config,
+                config=config,
             )
             candidate = response.candidates[0]
             contents.append(candidate.content)
@@ -319,6 +339,7 @@ class CommuteAgent:
         tool_calls_made: List[str],
         origin: str,
         destination: str,
+        failed_tools: Optional[List[str]] = None,
     ) -> CommuteRecommendation:
         routes:     List[Dict] = []
         leave_by:   Optional[str] = None
@@ -360,6 +381,21 @@ class CommuteAgent:
         if risk_score >= 0.85:
             urgency = "CRITICAL"
 
+        # Proactive cost nudge: if recommended route is cab but user has metro history on same O→D
+        cost_nudge = _build_cost_nudge(routes[0] if routes else None, tool_results, origin, destination)
+        if cost_nudge:
+            explanation = explanation + f"\n\n{cost_nudge}"
+
+        # Uncertainty flagging (Task 7.4): append a note for every tool that returned no data
+        for fn in (failed_tools or []):
+            explanation = explanation + f"\n\nNote: {fn} returned no data — this recommendation may be less accurate."
+
+        # Build reasoning trace (Task 7.1)
+        tool_trace = [
+            {"name": tr["name"], "summary": _summarise_tool_result(tr["name"], tr.get("result", {}))}
+            for tr in tool_results
+        ]
+
         return CommuteRecommendation(
             explanation=       explanation,
             recommended_route= routes[0] if routes else None,
@@ -372,6 +408,7 @@ class CommuteAgent:
             uber_link=         self._build_uber_link(origin, destination),
             ola_link=          self._build_ola_link(origin, destination),
             tool_calls_made=   tool_calls_made,
+            tool_trace=        tool_trace,
         )
 
     @staticmethod
@@ -393,3 +430,108 @@ class CommuteAgent:
             f"&drop_name={quote(destination)}"
             f"&utm_source=commuteagent"
         )
+
+
+# ── Standalone helper (not a method) ─────────────────────────────────────────
+
+def _route_key(location: str) -> str:
+    return location.lower().strip().split(",")[0].strip()
+
+
+def _summarise_tool_result(name: str, result: Dict[str, Any]) -> str:
+    """One-line summary of a tool result for the reasoning trace UI."""
+    if not result or "error" in result:
+        return f"error: {result.get('error', 'no data')}"
+
+    if name == "get_weather":
+        risk = result.get("commute_impact", {}).get("delay_risk", "?")
+        cond = result.get("condition", "?")
+        return f"risk: {risk} ({cond})"
+
+    if name == "get_route_options":
+        n = result.get("num_options", 0)
+        return f"{n} options scored"
+
+    if name == "get_comfort_advisory":
+        heat  = result.get("heat_index_c", "?")
+        crowd = result.get("crowding_label", "?")
+        return f"heat: {heat}°C, crowding: {crowd}"
+
+    if name == "get_user_history":
+        count = result.get("count", 0)
+        return f"{count} past trips loaded"
+
+    if name == "calculate_leave_time":
+        leave_by = result.get("leave_by", "?")
+        urgency  = result.get("urgency", "?")
+        return f"leave by: {leave_by}, urgency: {urgency}"
+
+    if name == "get_traffic_conditions":
+        level = result.get("traffic_level", "?")
+        delay = result.get("delay_seconds") or 0
+        delay_min = int(delay) // 60
+        return f"traffic: {level}, delay: {delay_min}min" if delay_min else f"traffic: {level}"
+
+    if name == "get_metro_status":
+        line = result.get("line", "?")
+        op   = "operational" if result.get("operational") else "not operational"
+        return f"{line}: {op}"
+
+    if name == "find_nearest_metro":
+        station = result.get("nearest_station", "?")
+        dist    = result.get("distance_km", "?")
+        return f"nearest: {station} ({dist}km)"
+
+    if name == "get_cost_insights":
+        total = result.get("total_spent", 0)
+        opps  = len(result.get("savings_opportunities", []))
+        return f"spend: ₹{total}, {opps} savings found"
+
+    return "ok"
+
+
+def _build_cost_nudge(
+    recommended: Optional[Dict[str, Any]],
+    tool_results: List[Dict],
+    origin: str,
+    destination: str,
+) -> Optional[str]:
+    """Return a cost-comparison note when a cab is recommended but metro history exists."""
+    if not recommended:
+        return None
+    label = (recommended.get("label") or "").lower()
+    if "cab" not in label:
+        return None
+
+    cab_cost = recommended.get("total_cost_rupees")
+    if not cab_cost:
+        return None
+
+    # Extract trip history from tool results
+    past_trips: List[Dict] = []
+    for tr in tool_results:
+        if tr.get("name") == "get_user_history":
+            past_trips = tr.get("result", {}).get("trips", [])
+            break
+
+    if not past_trips:
+        return None
+
+    o_key = _route_key(origin)
+    d_key = _route_key(destination)
+
+    for trip in past_trips:
+        if trip.get("mode") not in ("metro", "metro_hybrid", "transit"):
+            continue
+        if _route_key(trip.get("origin", "")) != o_key:
+            continue
+        if _route_key(trip.get("destination", "")) != d_key:
+            continue
+        metro_cost = trip.get("cost_inr")
+        if metro_cost:
+            return (
+                f"Note: You've taken metro on this route before (₹{metro_cost}). "
+                f"Today's cab option costs ₹{cab_cost}."
+            )
+
+    return None

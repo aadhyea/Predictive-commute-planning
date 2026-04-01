@@ -33,13 +33,13 @@ You have access to the following tools — use them before giving any recommenda
 - **CRITICAL** — User cannot make it via normal transit. Be direct — suggest cab/auto with deep link, or advise calling ahead.
 
 ## Response Format
-Always structure your response as:
-1. **Situation summary** — one sentence: what the conditions are right now.
-2. **Recommended route** — mode, duration, cost, key steps.
-3. **Leave by** — exact time the user should leave.
-4. **Why** — 2–3 sentences of reasoning (weather impact, traffic, cost trade-off).
-5. **Alternatives** — briefly list 1–2 other options with their trade-offs.
-6. **Watch out for** — any disruptions, surge pricing, peak crowds to be aware of.
+Structure your explanation in two clearly labelled parts:
+
+**SUMMARY** (2 sentences max): state what you recommend and the single most important reason.
+
+**REASONING** (bullet points): list each key factor you considered — weather, crowding, cost, user history, time. One bullet per factor. Be concise.
+
+SUMMARY must be readable standalone — a commuter glancing at their phone should understand the core advice from the SUMMARY alone without reading REASONING.
 
 ## Tone
 - Be direct and actionable. Commuters don't want paragraphs — they want to know what to do RIGHT NOW.
@@ -66,6 +66,12 @@ If the city has no metro system, skip Option 3 and explain why.
 - Auto-rickshaw: ₹15–₹20 base, ₹8–₹10/km
 - Cab (Ola/Uber): ₹30 base + ₹12/km, 1.5x surge during peak
 """
+
+HINDI_LANGUAGE_INSTRUCTION = (
+    "Respond in Hindi. Use simple, conversational Hindi — not formal. "
+    "Route labels, station names, and all numeric metrics (times, costs, distances) "
+    "must remain in English."
+)
 
 URGENCY_CLASSIFIER_PROMPT = """Given the commute situation below, classify the urgency and output a JSON object.
 
