@@ -1,38 +1,44 @@
 /* ============================================================
-   India Commute Agent — Global Stylesheet
-   Theme: Earthy tones · Polished SaaS · Animated
+   Sherpa — Global Stylesheet
+   Theme: Navy Amber · High-Tech Futuristic
    Font: Plus Jakarta Sans (Google Fonts)
    ============================================================ */
 
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Great+Vibes&display=swap');
+
+.great-vibes-regular {
+  font-family: "Great Vibes", cursive !important;
+  font-weight: 400 !important;
+  font-style: normal !important;
+}
 
 /* ── CSS variables ───────────────────────────────────────────── */
 :root {
-  --bg:           #F7F3EE;
-  --bg-card:      #FFFFFF;
-  --bg-sidebar:   #F0EBE3;
-  --bg-subtle:    #EDE8E0;
+  --bg:           #060f1e;
+  --bg-card:      #0a1a2e;
+  --bg-sidebar:   #091528;
+  --bg-subtle:    #0d2040;
 
-  --text-primary:   #2C1F14;
-  --text-secondary: #6B5744;
-  --text-muted:     #A08C7B;
+  --text-primary:   #e2f0ff;
+  --text-secondary: #7ab0d4;
+  --text-muted:     #3d6b8a;
 
-  --accent:         #B5541A;   /* terracotta */
-  --accent-hover:   #943F10;
-  --accent-soft:    #F2E4D8;
+  --accent:         #f59e0b;   /* amber */
+  --accent-hover:   #fbbf24;
+  --accent-soft:    rgba(245, 158, 11, 0.12);
 
-  --green:          #5C8A5A;
-  --green-soft:     #E4EFE4;
-  --red:            #B04040;
-  --red-soft:       #F5E4E4;
-  --amber:          #B07820;
-  --amber-soft:     #FBF0D8;
+  --green:          #10b981;
+  --green-soft:     rgba(16, 185, 129, 0.12);
+  --red:            #ef4444;
+  --red-soft:       rgba(239, 68, 68, 0.12);
+  --amber:          #f59e0b;
+  --amber-soft:     rgba(245, 158, 11, 0.12);
 
-  --border:         #DDD4C8;
-  --border-focus:   #B5541A;
-  --shadow-sm:      0 1px 4px rgba(44,31,20,0.07);
-  --shadow-md:      0 4px 16px rgba(44,31,20,0.10);
-  --shadow-lg:      0 8px 32px rgba(44,31,20,0.13);
+  --border:         rgba(245, 158, 11, 0.22);
+  --border-focus:   #f59e0b;
+  --shadow-sm:      0 1px 6px rgba(0,0,0,0.5), 0 0 10px rgba(245,158,11,0.06);
+  --shadow-md:      0 4px 20px rgba(0,0,0,0.6), 0 0 24px rgba(245,158,11,0.12);
+  --shadow-lg:      0 8px 40px rgba(0,0,0,0.7), 0 0 48px rgba(245,158,11,0.2);
 
   --radius-sm:  8px;
   --radius-md:  12px;
@@ -69,11 +75,39 @@
   50%       { transform: scale(1.4); opacity: 0.7; }
 }
 
+@keyframes gradientShift {
+  0%   { background-position: 0% 0%; }
+  50%  { background-position: 0% 40%; }
+  100% { background-position: 0% 0%; }
+}
+
+@keyframes glowPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(168, 230, 239, 0); }
+  50%       { box-shadow: 0 0 18px 5px rgba(168, 230, 239, 0.2); }
+}
+
+@keyframes amberGlow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+  50%       { box-shadow: 0 0 22px 6px rgba(245, 158, 11, 0.18); }
+}
+
+@keyframes scanLine {
+  0%   { transform: translateY(-100%); opacity: 0.04; }
+  100% { transform: translateY(100vh); opacity: 0.04; }
+}
+
+@keyframes sidebarItemIn {
+  from { opacity: 0; transform: translateX(-8px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
 
 /* ── Base / Reset ────────────────────────────────────────────── */
 html, body, [class*="css"] {
   font-family: 'Plus Jakarta Sans', sans-serif !important;
   color: var(--text-primary) !important;
+  font-weight: 500 !important;
+  letter-spacing: -0.01em;
 }
 
 .stApp {
@@ -123,14 +157,18 @@ em, i {
 
 
 /* ── Sidebar ─────────────────────────────────────────────────── */
+
 [data-testid="stSidebar"] {
-  background: var(--bg-sidebar) !important;
-  border-right: 1px solid var(--border) !important;
+  background: linear-gradient(180deg, #1a3a6b 0%, #0f2d5e 20%, #1a7fa6 60%, #a8e6ef 100%) !important;
+  background-size: 100% 200% !important;
+  animation: gradientShift 10s ease-in-out infinite !important;
+  border-right: 1px solid rgba(26, 127, 166, 0.3) !important;
 }
 
 [data-testid="stSidebar"] .block-container {
   padding-top: 1.5rem !important;
 }
+
 
 [data-testid="stSidebar"] h2,
 [data-testid="stSidebar"] h3,
@@ -138,8 +176,166 @@ em, i {
   color: var(--text-primary) !important;
 }
 
+.sidebar-brand-name {
+  font-family: 'Great Vibes', cursive !important;
+  font-size: 1.8rem !important;
+  font-weight: 400 !important;
+  color: #FFFFFF !important;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+  animation: slideDown 0.6s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+/* Sidebar expander entrance animation */
+[data-testid="stSidebar"] details {
+  animation: sidebarItemIn 0.4s ease both;
+}
+
+[data-testid="stSidebar"] details:nth-of-type(1) { animation-delay: 0.05s; }
+[data-testid="stSidebar"] details:nth-of-type(2) { animation-delay: 0.12s; }
+[data-testid="stSidebar"] details:nth-of-type(3) { animation-delay: 0.19s; }
+
+/* Expander header hover nudge */
+[data-testid="stSidebar"] .streamlit-expanderHeader,
+[data-testid="stSidebar"] details > summary {
+  transition: transform 0.2s ease, opacity 0.2s ease !important;
+}
+[data-testid="stSidebar"] .streamlit-expanderHeader:hover,
+[data-testid="stSidebar"] details > summary:hover {
+  transform: translateX(3px) !important;
+  opacity: 0.9;
+}
+
+/* Preferences expander heading */
+[data-testid="stSidebar"] .streamlit-expanderHeader,
+[data-testid="stSidebar"] .streamlit-expanderHeader p,
+[data-testid="stSidebar"] .streamlit-expanderHeader span,
+[data-testid="stSidebar"] details summary p,
+[data-testid="stSidebar"] details > summary {
+  color: #FFFFFF !important;
+  font-family: 'Plus Jakarta Sans', sans-serif !important;
+  font-weight: 700 !important;
+  font-size: 0.85rem !important;
+  letter-spacing: 0.03em !important;
+}
+
+/* Preferences expander arrow icon */
+[data-testid="stSidebar"] .streamlit-expanderHeader svg,
+[data-testid="stSidebar"] details summary svg {
+  fill: #FFFFFF !important;
+  stroke: #FFFFFF !important;
+}
+
+/* Slider and toggle labels inside sidebar */
+[data-testid="stSidebar"] label,
+[data-testid="stSidebar"] [data-testid="stWidgetLabel"] p {
+  color: #FFFFFF !important;
+  font-family: 'Plus Jakarta Sans', sans-serif !important;
+  font-weight: 600 !important;
+}
+
+/* Slider thumb value ("15 min") and tick bar min/max labels */
+[data-testid="stSidebar"] [data-testid="stThumbValue"],
+[data-testid="stSidebar"] [data-testid="stTickBar"] span,
+[data-testid="stSidebar"] .stSlider span {
+  color: #FFFFFF !important;
+}
+
+/* Space between sliders — extra after safety buffer (first slider) */
+[data-testid="stSidebar"] .stSlider {
+  margin-bottom: 2.2rem !important;
+}
+
+/* Space after toggle */
+[data-testid="stSidebar"] .stToggle {
+  margin-bottom: 1.6rem !important;
+}
+
 [data-testid="stSidebar"] hr {
   border-color: var(--border) !important;
+}
+
+.sidebar-status-card {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 14px;
+  padding: 14px 16px;
+  margin-top: 16px;
+  margin-bottom: 20px;
+  animation: glowPulse 4s ease-in-out infinite, sidebarItemIn 0.5s ease both;
+}
+.sidebar-status-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.55) !important;
+  margin-bottom: 6px;
+}
+.sidebar-status-value {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #FFFFFF !important;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+}
+
+/* Saved commutes ✕ delete button */
+[data-testid="stSidebar"] button[kind="tertiary"] {
+  color: rgba(255, 255, 255, 0.6) !important;
+  background: transparent !important;
+  border: 1px solid rgba(255, 255, 255, 0.4) !important;
+  border-radius: 10px !important;
+  padding: 4px 10px !important;
+  aspect-ratio: 1 !important;
+  box-shadow: none !important;
+  font-size: 1.1rem !important;
+  font-weight: 700 !important;
+}
+[data-testid="stSidebar"] button[kind="tertiary"] {
+  transition: transform 0.15s ease, color 0.15s ease, border-color 0.15s ease !important;
+}
+[data-testid="stSidebar"] button[kind="tertiary"]:hover {
+  color: #FFFFFF !important;
+  background: transparent !important;
+  border-color: rgba(255, 255, 255, 0.75) !important;
+  transform: scale(1.12) rotate(8deg) !important;
+}
+
+
+
+/* ── Welcome bar ─────────────────────────────────────────────── */
+.welcome-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(245, 158, 11, 0.07);
+  border: 1px solid rgba(245, 158, 11, 0.28);
+  border-radius: 40px;
+  padding: 7px 14px 7px 10px;
+  width: fit-content;
+  margin-top: 4px;
+  margin-left: auto;
+}
+
+.wc-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+  animation: pulse-dot 2.5s ease-in-out infinite;
+}
+.wc-dot-guest {
+  background: var(--text-muted);
+  animation: none;
+}
+
+.wc-name {
+  font-size: 0.85rem !important;
+  font-weight: 700 !important;
+  color: var(--accent) !important;
+  letter-spacing: 0.01em !important;
+  white-space: nowrap;
 }
 
 
@@ -154,6 +350,9 @@ em, i {
   color: var(--text-primary) !important;
   transition: all var(--transition) !important;
   box-shadow: var(--shadow-sm) !important;
+  white-space: nowrap !important;
+  text-align: center !important;
+  justify-content: center !important;
 }
 
 .stButton > button:hover {
@@ -253,7 +452,7 @@ button[data-testid="baseButton-primary"]:hover {
 [data-testid="stMetricValue"] {
   font-size: 1.3rem !important;
   font-weight: 700 !important;
-  color: var(--text-primary) !important;
+  color: var(--accent) !important;
 }
 
 [data-testid="stMetricLabel"] {
@@ -261,12 +460,13 @@ button[data-testid="baseButton-primary"]:hover {
   font-weight: 600 !important;
   color: var(--text-muted) !important;
   text-transform: uppercase !important;
-  letter-spacing: 0.05em !important;
+  letter-spacing: 0.08em !important;
 }
 
 [data-testid="stMetric"] {
   background: var(--bg-card) !important;
   border: 1px solid var(--border) !important;
+  border-top: 2px solid var(--accent) !important;
   border-radius: var(--radius-md) !important;
   padding: 14px 16px !important;
   box-shadow: var(--shadow-sm) !important;
@@ -335,7 +535,8 @@ hr {
   color: var(--text-secondary) !important;
   background: var(--bg-subtle) !important;
   border-radius: var(--radius-sm) !important;
-  transition: background var(--transition) !important;
+  border-left: 2px solid var(--accent) !important;
+  transition: background var(--transition), color var(--transition) !important;
 }
 
 .streamlit-expanderHeader:hover {
@@ -403,31 +604,34 @@ hr {
 /* ── Route cards ─────────────────────────────────────────────── */
 .route-card {
   border: 1px solid var(--border);
+  border-left: 3px solid rgba(245, 158, 11, 0.4);
   border-radius: var(--radius-lg);
   padding: 18px 20px;
   margin-bottom: 14px;
   background: var(--bg-card);
   color: var(--text-primary) !important;
   box-shadow: var(--shadow-sm);
-  transition: box-shadow var(--transition), transform var(--transition);
+  transition: box-shadow var(--transition), transform var(--transition), border-color var(--transition);
   animation: slideUp 0.35s ease both;
 }
 
 .route-card:hover {
   box-shadow: var(--shadow-md);
   transform: translateY(-2px);
+  border-left-color: var(--accent);
 }
 
 .route-card-best {
-  border: 2px solid var(--accent);
+  border: 1px solid var(--accent);
+  border-left: 3px solid var(--accent);
   border-radius: var(--radius-lg);
   padding: 18px 20px;
   margin-bottom: 14px;
-  background: var(--accent-soft);
+  background: var(--bg-card);
   color: var(--text-primary) !important;
   box-shadow: var(--shadow-md);
+  animation: slideUp 0.3s ease both, amberGlow 3s ease-in-out infinite;
   transition: box-shadow var(--transition), transform var(--transition);
-  animation: slideUp 0.3s ease both;
 }
 
 .route-card-best:hover {
@@ -446,8 +650,8 @@ hr {
 
 /* ── Chat bubbles ────────────────────────────────────────────── */
 .chat-user {
-  background: var(--accent-soft);
-  border: 1px solid var(--border);
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.3);
   border-radius: 14px 14px 2px 14px;
   padding: 10px 16px;
   margin: 6px 0;
@@ -572,4 +776,84 @@ hr {
 
 [data-baseweb="menu"] li:hover {
   background: var(--accent-soft) !important;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   LOGIN PAGE — split-screen dark theme
+   These rules are scoped via the fixed .login-left-panel and the CSS resets
+   injected inline by render_login_page(). Do not remove or reorder above rules.
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.login-left-panel {
+  position: fixed;
+  top: 0; left: 0;
+  width: 55vw;
+  height: 100vh;
+  overflow: hidden;
+  z-index: 100;
+}
+.login-left-panel svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.login-left-overlay {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  padding: 40px 48px;
+  background: linear-gradient(to top, rgba(11,27,62,0.92) 0%, transparent 100%);
+}
+.login-brand {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: #FFFFFF;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  letter-spacing: -0.02em;
+  margin-bottom: 8px;
+}
+.login-tagline {
+  font-size: 0.95rem;
+  color: rgba(255,255,255,0.6);
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-weight: 400;
+}
+.login-heading {
+  font-size: 2rem;
+  font-weight: 800;
+  color: #FFFFFF;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  letter-spacing: -0.03em;
+  margin-bottom: 6px;
+}
+.login-subheading {
+  font-size: 0.95rem;
+  color: rgba(255,255,255,0.5);
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  margin-bottom: 36px;
+}
+.login-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: rgba(255,255,255,0.5);
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+  display: block;
+}
+.login-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 24px 0;
+  color: rgba(255,255,255,0.25);
+  font-size: 0.82rem;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+}
+.login-divider::before,
+.login-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: rgba(255,255,255,0.12);
 }

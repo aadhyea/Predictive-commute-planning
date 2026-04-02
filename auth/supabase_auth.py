@@ -1,5 +1,5 @@
 """
-Supabase Auth helpers for the Commute Agent.
+Supabase Auth helpers for Sherpa.
 
 Supports:
   - Magic link (email OTP)

@@ -1,5 +1,5 @@
 """
-Supabase client for Delhi Commute Agent - all CRUD operations
+Supabase client for Sherpa - all CRUD operations
 """
 
 import logging

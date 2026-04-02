@@ -1,9 +1,10 @@
 """
-Delhi Commute Agent — Streamlit UI
+Sherpa — Streamlit UI
 Run: streamlit run ui/streamlit_app.py
 """
 
 import asyncio
+import base64
 import concurrent.futures
 import sys
 import os
@@ -336,34 +337,291 @@ def render_route_card(route: Dict[str, Any], is_best: bool = False):
 # ══════════════════════════════════════════════════════════════════════════════
 def render_login_page():
     st.set_page_config(
-        page_title="Delhi Commute Agent",
-        page_icon="🚇",
-        layout="centered",
+        page_title="Sherpa",
+        page_icon="🧭",
+        layout="wide",
     )
 
-    st.title("🚇 India Commute Agent")
-    st.caption("AI-powered commute planning across Indian cities — real-time routes, weather, and smart timing")
-    st.divider()
+    # Read SVG hero at runtime so the rendered HTML gets the raw SVG block inlined
+    _svg_path = os.path.join(os.path.dirname(__file__), "assets", "commute_landing_hero.svg")
+    with open(_svg_path, encoding="utf-8") as _f:
+        _svg = _f.read()
+    # Ensure the svg tag fills the panel with cover behaviour
+    _svg = _svg.replace("<svg ", '<svg height="100%" preserveAspectRatio="xMidYMid slice" ', 1)
 
-    tab_magic, tab_google = st.tabs(["Magic link", "Google"])
+    # ── Chrome hiding + login page CSS ────────────────────────────────────────
+    st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Great+Vibes&display=swap');
 
-    with tab_magic:
-        email = st.text_input("Email address", key="login_email")
-        if st.button("Send magic link", use_container_width=True, type="primary"):
-            if sign_in_magic_link(email):
-                st.success("Check your inbox for a sign-in link.")
-            else:
-                st.error("Could not send link — check the email address.")
 
-    with tab_google:
-        google_url = sign_in_google()
-        if google_url:
-            st.link_button("Continue with Google", google_url, use_container_width=True)
+
+.great-vibes-regular {
+  font-family: "Great Vibes", cursive !important;
+  font-weight: 400 !important;
+  font-style: normal !important;
+}
+
+/* Global font override for the login page */
+.stApp, .stApp * {
+  font-family: 'Plus Jakarta Sans', sans-serif !important;
+}
+
+/* Hide all Streamlit chrome */
+#MainMenu, footer, header { display: none !important; }
+[data-testid="stToolbar"] { display: none !important; }
+
+/* App background = right panel dark colour */
+.stApp { background: #0F1F4A !important; }
+
+/* Right panel: occupies the remaining 45vw to the right of the fixed left panel */
+section[data-testid="stMain"],
+section.main {
+  position: fixed !important;
+  right: 0 !important;
+  top: 0 !important;
+  width: 45vw !important;
+  height: 100vh !important;
+  overflow-y: auto !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 60px 56px !important;
+  background: #0F1F4A !important;
+  box-sizing: border-box !important;
+}
+section[data-testid="stMain"] .block-container,
+section.main .block-container {
+  max-width: 380px !important;
+  width: 100% !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+/* ── Left panel (fixed) ── */
+.login-left-panel {
+  position: fixed;
+  top: 0; left: 0;
+  width: 55vw;
+  height: 100vh;
+  overflow: hidden;
+  z-index: 100;
+}
+.login-left-panel svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.login-brand-top {
+  position: absolute;
+  top: 32px; left: 40px;
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: #FFFFFF;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  letter-spacing: -0.02em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  z-index: 10;
+}
+.login-left-overlay {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  padding: 40px 48px;
+  background: linear-gradient(to top, rgba(11,27,62,0.92) 0%, transparent 100%);
+}
+.login-tagline {
+  font-size: 0.95rem;
+  color: rgba(255,255,255,0.6);
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-weight: 400;
+}
+
+/* ── Right panel typography ── */
+.login-heading {
+  font-size: 2rem;
+  font-weight: 800;
+  color: #FFFFFF;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  letter-spacing: -0.03em;
+  margin-bottom: 6px;
+}
+.login-subheading {
+  font-size: 0.95rem;
+  color: rgba(255,255,255,0.5);
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  margin-bottom: 36px;
+}
+.login-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: rgba(255,255,255,0.5);
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+  display: block;
+}
+.login-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 24px 0;
+  color: rgba(255,255,255,0.25);
+  font-size: 0.82rem;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+}
+.login-divider::before,
+.login-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: rgba(255,255,255,0.12);
+}
+.login-guest-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 32px;
+}
+.login-guest-link {
+  font-size: 0.82rem;
+  color: rgba(255,255,255,0.45);
+  text-decoration: none;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+.login-guest-link:hover { color: rgba(255,255,255,0.8); }
+/* Guest Streamlit button hidden off-screen — clicked via JS from top link */
+[data-testid="stBaseButton-secondary"] {
+  position: fixed !important;
+  left: -9999px !important;
+  opacity: 0 !important;
+}
+
+/* ── Widget overrides for dark login theme ── */
+.stTextInput > div > div > input {
+  background: rgba(255,255,255,0.06) !important;
+  border: 1px solid rgba(255,255,255,0.15) !important;
+  border-radius: 10px !important;
+  color: #FFFFFF !important;
+  font-size: 0.95rem !important;
+  padding: 12px 16px !important;
+}
+.stTextInput > div > div > input::placeholder {
+  color: rgba(255,255,255,0.35) !important;
+}
+.stTextInput > div > div > input:focus {
+  border-color: #00C2FF !important;
+  box-shadow: 0 0 0 3px rgba(0,194,255,0.15) !important;
+}
+.stTextInput label { display: none !important; }
+
+/* Primary button — steel blue */
+.stButton > button[kind="primary"],
+button[data-testid="baseButton-primary"] {
+  background: #3090C7 !important;
+  border: none !important;
+  color: #FFFFFF !important;
+  font-weight: 800 !important;
+  font-size: 0.5rem !important;
+  letter-spacing: 0.1em !important;
+  text-transform: uppercase !important;
+  border-radius: 10px !important;
+  padding: 12px !important;
+  transition: all 0.2s ease !important;
+  font-family: 'Plus Jakarta Sans', sans-serif !important;
+}
+.stButton > button[kind="primary"]:hover,
+button[data-testid="baseButton-primary"]:hover {
+  background: #4aa8db !important;
+  transform: translateY(-1px) !important;
+}
+
+/* Secondary / ghost button */
+.stButton > button[kind="secondary"],
+button[data-testid="baseButton-secondary"] {
+  background: transparent !important;
+  border: 1px solid rgba(255,255,255,0.2) !important;
+  color: rgba(255,255,255,0.7) !important;
+  border-radius: 10px !important;
+  font-weight: 500 !important;
+  font-family: 'Plus Jakarta Sans', sans-serif !important;
+  transition: all 0.2s ease !important;
+}
+.stButton > button[kind="secondary"]:hover,
+button[data-testid="baseButton-secondary"]:hover {
+  border-color: rgba(255,255,255,0.45) !important;
+  color: #FFFFFF !important;
+  background: rgba(255,255,255,0.05) !important;
+}
+
+/* Link button (Google) */
+.stLinkButton a {
+  background: transparent !important;
+  border: 1px solid rgba(255,255,255,0.2) !important;
+  color: rgba(255,255,255,0.85) !important;
+  border-radius: 10px !important;
+  font-weight: 800 !important;
+  font-size: 0.5rem !important;
+  letter-spacing: 0.1em !important;
+  text-transform: uppercase !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 11px !important;
+  width: 100% !important;
+  font-family: 'Plus Jakarta Sans', sans-serif !important;
+  transition: all 0.2s ease !important;
+}
+.stLinkButton a:hover {
+  border-color: rgba(255,255,255,0.4) !important;
+  color: #FFFFFF !important;
+  background: rgba(255,255,255,0.05) !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+    # ── Left panel — fixed, full-viewport SVG hero ─────────────────────────────
+    st.markdown(f"""
+<div class="login-left-panel">
+  <div class="login-brand-top">🧭 <span class="great-vibes-regular" style="font-size:1.5rem">Sherpa</span></div>
+  {_svg}
+</div>
+""", unsafe_allow_html=True)
+
+    # ── Right panel — guest shortcut at top ───────────────────────────────────
+    st.markdown("""
+<div class="login-guest-row">
+  <span class="login-guest-link"
+    onclick="(function(){var btns=window.parent.document.querySelectorAll('button');for(var b of btns){if(b.innerText.includes('guest')){b.click();break;}}})()">
+    Continue as guest →
+  </span>
+</div>
+<div class="login-heading">Welcome !</div>
+<div class="login-subheading">Plan smarter. Commute better.</div>
+<span class="login-label">Sign in with email</span>
+""", unsafe_allow_html=True)
+
+    # ── Email magic link ───────────────────────────────────────────────────────
+    email = st.text_input("Email address", placeholder="you@example.com", key="login_email", label_visibility="collapsed")
+    if st.button("SEND MAGIC LINK →", use_container_width=True, type="primary"):
+        if sign_in_magic_link(email):
+            st.success("Check your inbox for a sign-in link.")
         else:
-            st.error("Google sign-in is unavailable right now.")
+            st.error("Could not send link — check the email address.")
 
-    st.divider()
-    if st.button("Enter as Guest", type="secondary"):
+    st.markdown('<div class="login-divider">or</div>', unsafe_allow_html=True)
+
+    # ── Google OAuth ───────────────────────────────────────────────────────────
+    google_url = sign_in_google()
+    if google_url:
+        st.link_button("CONTINUE WITH GOOGLE", google_url, use_container_width=True)
+    else:
+        st.error("Google sign-in is unavailable right now.")
+
+    # ── Guest access — hidden button clicked via JS from the top link ────────
+    if st.button("Continue as guest →", type="secondary", key="guest_btn"):
         st.session_state["page"] = "app"
         st.session_state["user"] = None
         st.rerun()
@@ -374,77 +632,109 @@ def render_login_page():
 # ══════════════════════════════════════════════════════════════════════════════
 def render_app():
     st.set_page_config(
-        page_title="Delhi Commute Agent",
-        page_icon="🚇",
+        page_title="Sherpa",
+        page_icon="🧭",
         layout="wide",
         initial_sidebar_state="expanded",
     )
-
     # ── CSS ───────────────────────────────────────────────────────────────────
     _css_path = os.path.join(os.path.dirname(__file__), "styles.css")
-    with open(_css_path) as _f:
+    with open(_css_path, encoding="utf-8") as _f:
         st.markdown(f"<style>{_f.read()}</style>", unsafe_allow_html=True)
+
+    # ── Main page background image (sidebar excluded) ─────────────────────────
+    _img_path = os.path.join(os.path.dirname(__file__), "assets", "image.png")
+    with open(_img_path, "rb") as _img_f:
+        _img_b64 = base64.b64encode(_img_f.read()).decode()
+    st.markdown(f"""
+    <style>
+    [data-testid="stMain"] {{
+        background-image: url("data:image/png;base64,{_img_b64}") !important;
+        background-size: cover !important;
+        background-position: center !important;
+        background-attachment: fixed !important;
+    }}
+    [data-testid="stMain"]::before {{
+        content: "";
+        position: fixed;
+        inset: 0;
+        background: rgba(6, 15, 30, 0.83);
+        pointer-events: none;
+        z-index: 0;
+    }}
+    [data-testid="stMain"] > div {{
+        position: relative;
+        z-index: 1;
+    }}
+    </style>
+    """, unsafe_allow_html=True)
 
     # ── Welcome bar ───────────────────────────────────────────────────────────
     user = get_current_user()
-    _wb_spacer, _wb_info, _wb_btn = st.columns([6, 2, 1])
+    _wb_spacer, _wb_right = st.columns([3, 2])
     if user:
         _full_name = (getattr(user, "user_metadata", None) or {}).get("full_name")
         _display = _full_name or getattr(user, "email", "")
-        with _wb_info:
-            st.markdown(
-                f"<div style='text-align:right; padding-top:6px'>Welcome, {_display}</div>",
-                unsafe_allow_html=True,
-            )
-        with _wb_btn:
-            if st.button("Sign out", key="wb_signout"):
-                sign_out()
-                st.session_state["page"] = "login"
-                st.rerun()
+        _first = _display.split()[0] if _display else _display
+        with _wb_right:
+            _wc_col, _so_col = st.columns([3, 2])
+            with _wc_col:
+                st.markdown(f"""
+                <div class="welcome-chip">
+                  <span class="wc-dot"></span>
+                  <span class="wc-name">Welcome, {_first}</span>
+                </div>
+                """, unsafe_allow_html=True)
+            with _so_col:
+                if st.button("⏻  Sign out", key="wb_signout", use_container_width=True):
+                    sign_out()
+                    st.session_state["page"] = "login"
+                    st.rerun()
     else:
-        with _wb_info:
-            st.markdown(
-                "<div style='text-align:right; padding-top:6px'>Browsing as guest</div>",
-                unsafe_allow_html=True,
-            )
-        with _wb_btn:
-            if st.button("Sign in", key="wb_signin"):
-                st.session_state["page"] = "login"
-                st.rerun()
+        with _wb_right:
+            _wc_col, _si_col = st.columns([3, 2])
+            with _wc_col:
+                st.markdown("""
+                <div class="welcome-chip">
+                  <span class="wc-dot wc-dot-guest"></span>
+                  <span class="wc-name" style="color:var(--text-muted)!important">Guest</span>
+                </div>
+                """, unsafe_allow_html=True)
+            with _si_col:
+                if st.button("→  Sign in", key="wb_signin", use_container_width=True):
+                    st.session_state["page"] = "login"
+                    st.rerun()
 
     # ── SIDEBAR ───────────────────────────────────────────────────────────────
     with st.sidebar:
 
-        st.divider()
-        st.markdown("## ⚙️ Preferences")
-        st.divider()
+        # ── Brand header ──────────────────────────────────────────────
+        st.markdown("""
+        <div class="sidebar-brand">
+          <div class="sidebar-brand-text">
+            <div class="sidebar-brand-name">🧭 Sherpa</div>
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
 
-        buffer_minutes = st.slider(
-            "Safety buffer (min)", min_value=5, max_value=45, value=15, step=5,
-            help="Extra time you want before your arrival deadline",
-        )
-        prefer_comfort = st.toggle("Prefer comfort over speed", value=True)
-        max_walk = st.slider(
-            "Max walking (min)", min_value=5, max_value=30, value=10, step=5
-        )
+        # ── Preferences section ───────────────────────────────────────
+        with st.expander("⚙️ Preferences", expanded=True):
+            buffer_minutes = st.slider(
+                "Safety buffer", min_value=5, max_value=45, value=15, step=5,
+                help="Extra time you want before your arrival deadline",
+                format="%d min",
+            )
+            prefer_comfort = st.toggle("Prefer comfort over speed", value=True)
+            max_walk = st.slider(
+                "Max walking", min_value=5, max_value=30, value=10, step=5,
+                format="%d min",
+            )
 
-        st.divider()
-        st.markdown("### 🌆 City")
-        CITY_OPTIONS = [
-            "Auto-detect", "Delhi / NCR", "Mumbai", "Bengaluru",
-            "Chennai", "Hyderabad", "Kolkata", "Pune", "Ahmedabad",
-        ]
-        city_override = st.selectbox(
-            "City (overrides auto-detect)",
-            options=CITY_OPTIONS,
-            index=0,
-            help="Auto-detect reads the city from your origin address. Override if detection is wrong.",
-        )
-        # Persist so it survives reruns without being inside the form
-        st.session_state["city_override"] = city_override
+        # City is always auto-detected from origin address
+        if "city_override" not in st.session_state:
+            st.session_state["city_override"] = "Auto-detect"
 
-        st.divider()
-        st.markdown("### 📍 Quick Fill")
+        # ── Quick Fill section ────────────────────────────────────────
         def _quick_fill(origin: str, dest: str):
             st.session_state["prefill_origin"]      = origin
             st.session_state["prefill_destination"] = dest
@@ -453,36 +743,48 @@ def render_app():
                 st.session_state.pop(key, None)
             st.rerun()
 
-        if st.button("🏠 Delhi: Rajiv Chowk → Cyber City", use_container_width=True):
-            _quick_fill("Rajiv Chowk Metro Station, Delhi", "Cyber City, Gurugram")
-        if st.button("📍 Delhi: CP → Noida Sector 62", use_container_width=True):
-            _quick_fill("Connaught Place, New Delhi", "Noida Sector 62, Uttar Pradesh")
-        if st.button("✈️ Bangalore: Indiranagar → Whitefield", use_container_width=True):
-            _quick_fill("Indiranagar, Bengaluru", "Whitefield, Bengaluru")
-        if st.button("🌊 Mumbai: Andheri → Bandra Kurla Complex", use_container_width=True):
-            _quick_fill("Andheri Station, Mumbai", "Bandra Kurla Complex, Mumbai")
+        with st.expander("⚡ Quick Fill", expanded=False):
+            if st.button("🏠  Rajiv Chowk → Cyber City", use_container_width=True):
+                _quick_fill("Rajiv Chowk Metro Station, Delhi", "Cyber City, Gurugram")
+            if st.button("📍  CP → Noida Sector 62", use_container_width=True):
+                _quick_fill("Connaught Place, New Delhi", "Noida Sector 62, Uttar Pradesh")
+            if st.button("✈️  Indiranagar → Whitefield", use_container_width=True):
+                _quick_fill("Indiranagar, Bengaluru", "Whitefield, Bengaluru")
+            if st.button("🌊  Andheri → Bandra Kurla", use_container_width=True):
+                _quick_fill("Andheri Station, Mumbai", "Bandra Kurla Complex, Mumbai")
 
-        st.divider()
-
-        # ── Saved commutes (logged-in users only) ─────────────────────────────
+        # ── Saved Commutes ────────────────────────────────────────────
         _sidebar_user = get_current_user()
         if _sidebar_user:
             saved = get_client().get_saved_commutes(_sidebar_user.id)
             if saved:
-                st.markdown("### 🔖 Saved Commutes")
-                for c in saved:
-                    col_btn, col_del = st.columns([5, 1])
-                    with col_btn:
-                        if st.button(c["name"], key=f"saved_{c['id']}", use_container_width=True):
-                            _quick_fill(c["origin"], c["destination"])
-                    with col_del:
-                        if st.button("✕", key=f"del_{c['id']}", help="Remove"):
-                            _del_session = supabase.auth.get_session()
-                            if _del_session and _del_session.access_token:
-                                get_client().delete_saved_commute(_del_session.access_token, c["id"])
-                            st.rerun()
-                st.divider()
+                with st.expander("🔖 Saved Commutes", expanded=False):
+                    for c in saved:
+                        col_btn, col_del = st.columns([5, 1])
+                        with col_btn:
+                            if st.button(c["name"], key=f"saved_{c['id']}", use_container_width=True):
+                                _quick_fill(c["origin"], c["destination"])
+                        with col_del:
+                            if st.button("✕", key=f"del_{c['id']}", help="Remove", type="tertiary"):
+                                _del_session = supabase.auth.get_session()
+                                if _del_session and _del_session.access_token:
+                                    get_client().delete_saved_commute(_del_session.access_token, c["id"])
+                                st.rerun()
 
+        # ── Status card (bottom) ──────────────────────────────────────
+        if st.session_state.get("city_override") == "Auto-detect":
+            _active_city = st.session_state.get("detected_city", "Detecting...")
+        else:
+            _active_city = st.session_state.get("city_override")
+
+        st.markdown(f"""
+        <div class="sidebar-status-card">
+          <div class="sidebar-status-label">📍 Active City</div>
+          <div class="sidebar-status-value">{_active_city}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # ── Dev tools ─────────────────────────────────────────────────
         with st.expander("🧪 Dev tools", expanded=False):
             if st.button("Reset alert cooldown", use_container_width=True):
                 st.session_state.pop("alerts_last_checked_at", None)
@@ -492,11 +794,9 @@ def render_app():
             st.caption(f"Last check: {st.session_state.get('alerts_last_checked_at', 'never')}")
             st.caption(f"Last SMS: {st.session_state.get('last_sms_sent_at', 'never')}")
 
-        st.caption("Delhi Commute Agent · Powered by Gemini 2.5 Flash")
-
 
     # ── HEADER ────────────────────────────────────────────────────────────────
-    st.markdown("# 🚇 India Commute Agent")
+    st.markdown('# 🧭 <span class="great-vibes-regular" style="font-size:2.8rem">Sherpa</span>', unsafe_allow_html=True)
     st.markdown("*AI-powered commute planning across Indian cities — real-time routes, weather, and smart timing*")
     st.divider()
 
@@ -562,6 +862,24 @@ def render_app():
                 key="dest_searchbox",
                 clear_on_submit=False,
             )
+        
+        # ── Auto-detect city on input change (without submit) ──
+        if origin and destination:
+            prev_origin = st.session_state.get("last_origin_for_city")
+
+            # Only run when origin actually changes (avoid rerun spam)
+            if origin != prev_origin:
+                try:
+                    o_geo, _ = geocode_endpoints(origin, destination)
+                    auto_city = extract_city_from_geo(o_geo)
+
+                    if auto_city and auto_city != "unknown":
+                        st.session_state["detected_city"] = auto_city
+
+                    st.session_state["last_origin_for_city"] = origin
+
+                except Exception:
+                    pass
 
         # ── Remaining inputs + submit (inside form to batch the submit action) ──
         with st.form("plan_form"):
