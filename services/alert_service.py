@@ -125,7 +125,7 @@ def send_sms_alerts(alerts: list[dict]):
             logger.warning("Twilio credentials missing — skipping SMS")
             return
         client = Client(account_sid, auth_token)
-        lines = ["🚇 Commute Alert:"]
+        lines = ["🧭 Sherpa Alert:"]
         for a in alerts:
             lines.append(f"• {a['message']}")
             if a.get("suggestion"):

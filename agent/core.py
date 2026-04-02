@@ -1,5 +1,9 @@
 """
+<<<<<<< HEAD
 Commute Agent — core agentic loop (Gemini 2.0 Flash).
+=======
+Sherpa — core agentic loop (Gemini 2.0 Flash).
+>>>>>>> fix/ui
 
 Uses the google-genai SDK with function calling to let Gemini autonomously:
   1. Gather data (weather, routes, metro status)

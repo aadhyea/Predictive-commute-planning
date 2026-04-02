@@ -1,4 +1,4 @@
--- Delhi Commute Agent - Initial Database Schema
+-- Sherpa - Initial Database Schema
 -- Run this on your Supabase project via the SQL Editor
 -- https://supabase.com/dashboard/project/<your-project>/sql
 

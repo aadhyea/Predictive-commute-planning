@@ -1,5 +1,5 @@
 """
-Database layer for Delhi Commute Agent
+Database layer for Sherpa
 """
 
 from .supabase_client import SupabaseClient, get_client

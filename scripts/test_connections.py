@@ -164,7 +164,7 @@ async def test_maps():
 
 async def main():
     print("=" * 55)
-    print("  DELHI COMMUTE AGENT - CONNECTION TESTS")
+    print("  SHERPA - CONNECTION TESTS")
     print("=" * 55)
 
     results = {
