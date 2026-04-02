@@ -171,7 +171,25 @@ GEMINI_TOOLS = [
                 required=["user_id"],
             ),
         ),
- 
+
+        types.FunctionDeclaration(
+            name="get_cost_insights",
+            description=(
+                "Get monthly commute cost analysis and savings opportunities for the user. "
+                "Returns total spend this month, breakdown by transport mode, and top 3 savings "
+                "opportunities (routes where metro was available but cab was taken). "
+                "Call this proactively when the user asks about cost, budget, or spending."
+            ),
+            parameters=S(
+                type=T.OBJECT,
+                properties={
+                    "user_id": S(type=T.STRING, description="The authenticated user's UUID"),
+                    "month": S(type=T.STRING, description="Month in YYYY-MM format, e.g. '2025-01'. Defaults to current month if omitted."),
+                },
+                required=["user_id"],
+            ),
+        ),
+
     ])
 ]
 
@@ -208,6 +226,9 @@ async def execute_tool(tool_name: str, tool_input: Dict[str, Any]) -> str:
             result = await _get_comfort_advisory(tool_input)
         elif tool_name == "get_user_history":
             result = await _get_user_history(tool_input)
+
+        elif tool_name == "get_cost_insights":
+            result = await _get_cost_insights(tool_input)
 
         else:
             result = {"error": f"Unknown tool: {tool_name}"}
@@ -511,4 +532,48 @@ async def _get_user_history(inp: Dict) -> Dict:
         "trips": trips,
         "count": len(trips),
         "has_history": len(trips) > 0,
+    }
+
+
+async def _get_cost_insights(inp: Dict) -> Dict:
+    user_id = inp.get("user_id", "").strip()
+    if not user_id:
+        return {"error": "user_id is required"}
+
+    month = inp.get("month") or datetime.now().strftime("%Y-%m")
+
+    from database.supabase_client import get_client
+    from services.memory_service import detect_savings_opportunities
+
+    db     = get_client()
+    spend  = db.get_monthly_spend(user_id, month)
+    trips  = db.get_trip_history(user_id, limit=50)
+
+    opportunities = detect_savings_opportunities(spend, trips)[:3]
+
+    total        = spend.get("total_spent", 0)
+    total_saving = sum(o["saving"] for o in opportunities)
+
+    if total_saving > 0 and opportunities:
+        summary = (
+            f"You've spent ₹{total} on commutes this month. "
+            f"Switching to metro on your {len(opportunities)} most frequent routes "
+            f"would save ₹{total_saving}/month."
+        )
+    elif total > 0:
+        summary = (
+            f"You've spent ₹{total} on commutes this month "
+            f"across {spend.get('trip_count', 0)} trips."
+        )
+    else:
+        summary = "No commute spend data found for this month."
+
+    return {
+        "month":                month,
+        "total_spent":          total,
+        "by_mode":              spend.get("by_mode", {}),
+        "trip_count":           spend.get("trip_count", 0),
+        "avg_trip_cost":        spend.get("avg_trip_cost", 0),
+        "savings_opportunities": opportunities,
+        "summary":              summary,
     }

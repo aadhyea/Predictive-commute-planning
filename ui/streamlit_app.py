@@ -1,5 +1,5 @@
 """
-Delhi Commute Agent — Streamlit UI
+Sherpa Commute Agent — Streamlit UI
 Run: streamlit run ui/streamlit_app.py
 """
 
@@ -9,6 +9,8 @@ import sys
 import os
 from datetime import datetime, date, time, timedelta
 from typing import Any, Dict, List, Optional
+from dotenv import load_dotenv
+load_dotenv()
 
 # Make sure project root is on path when running from ui/
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -260,8 +262,6 @@ def _build_uber_link(origin: str, dest: str, o_geo=None, d_geo=None) -> str:
 
 def _build_uber_qr_link(origin: str, dest: str, o_geo=None, d_geo=None) -> str:
     """Universal Link for Uber QR code — opens app if installed, mobile web otherwise."""
-    # Use the same https:// Universal Link as the button; the uber:// scheme fails
-    # silently when the app is not installed (iOS drops it entirely).
     return _build_uber_link(origin, dest, o_geo, d_geo)
 
 
@@ -279,14 +279,12 @@ def _build_ola_link(origin: str, dest: str, o_geo=None, d_geo=None) -> str:
 
 # ── Route card renderer ───────────────────────────────────────────────────────
 def render_route_card(route: Dict[str, Any], is_best: bool = False):
-    # Metrics row
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("⏱ Duration",  fmt_duration(route.get("total_duration_minutes", 0)))
     c2.metric("💰 Cost",      f"₹{route.get('total_cost_rupees', 0)}")
     c3.metric("✅ On-time",   f"{round(route.get('on_time_probability', 0) * 100)}%")
     c4.metric("🔀 Transfers", route.get("num_transfers", 0))
 
-    # Arrival time + distance
     meta_parts = []
     try:
         arr = datetime.fromisoformat(route["arrival_time"])
@@ -299,18 +297,17 @@ def render_route_card(route: Dict[str, Any], is_best: bool = False):
     if meta_parts:
         st.caption("  ·  ".join(meta_parts))
 
-    # Steps
     steps = route.get("steps", [])
     if steps:
         with st.expander("Step-by-step", expanded=is_best):
             for step in steps:
-                icon = mode_icon(step.get("mode", ""))
-                dur  = fmt_duration(step.get("duration_minutes", 0))
+                icon   = mode_icon(step.get("mode", ""))
+                dur    = fmt_duration(step.get("duration_minutes", 0))
                 dist_s = step.get("distance_km", 0)
-                inst = step.get("instruction", "")
-                line = step.get("line", "")
+                inst   = step.get("instruction", "")
+                line   = step.get("line", "")
                 line_str = f" · *{line}*" if line else ""
-                cost_s = step.get("cost_rupees", 0)
+                cost_s   = step.get("cost_rupees", 0)
                 cost_str = f" · ₹{cost_s}" if cost_s else ""
                 st.markdown(
                     f"{icon} **{dur}** · {dist_s:.1f} km{line_str}{cost_str}  \n"
@@ -318,7 +315,6 @@ def render_route_card(route: Dict[str, Any], is_best: bool = False):
                     unsafe_allow_html=True,
                 )
 
-    # Notes
     for note in route.get("notes", []):
         st.warning(note, icon="⚠️")
 
@@ -373,60 +369,9 @@ def render_app():
     )
 
     # ── CSS ───────────────────────────────────────────────────────────────────
-    st.markdown("""
-<style>
-/* ── General ── */
-.main .block-container { padding-top: 1.5rem; }
-h1 { font-size: 2rem !important; }
-
-/* ── Urgency badges ── */
-.badge {
-    display: inline-block;
-    padding: 4px 14px;
-    border-radius: 20px;
-    font-weight: 700;
-    font-size: 0.85rem;
-    letter-spacing: 0.05em;
-}
-.badge-low      { background:#d4edda; color:#155724; }
-.badge-medium   { background:#fff3cd; color:#856404; }
-.badge-high     { background:#ffe0b2; color:#b34800; }
-.badge-critical { background:#f8d7da; color:#721c24; }
-
-/* ── Route cards ── */
-.route-card {
-    border: 1px solid #dee2e6;
-    border-radius: 10px;
-    padding: 16px;
-    margin-bottom: 12px;
-    background: #ffffff;
-    color: #212529 !important;
-}
-.route-card-best {
-    border: 2px solid #0d6efd;
-    border-radius: 10px;
-    padding: 16px;
-    margin-bottom: 12px;
-    background: #f0f5ff;
-    color: #212529 !important;
-}
-.route-label {
-    font-size: 1.1rem;
-    font-weight: 700;
-    color: #212529 !important;
-    margin-bottom: 8px;
-}
-
-/* ── Metric text — inherit from Streamlit theme ── */
-[data-testid="stMetricValue"]  { font-size: 1.25rem !important; font-weight: 700 !important; }
-[data-testid="stMetricLabel"]  { font-size: 0.8rem !important; opacity: 0.75; }
-
-
-/* ── Chat ── */
-.chat-user  { background:#e9ecef; border-radius:12px 12px 2px 12px; padding:10px 14px; margin:6px 0; text-align:right; }
-.chat-agent { background:#f0f5ff; border-radius:12px 12px 12px 2px; padding:10px 14px; margin:6px 0; }
-</style>
-""", unsafe_allow_html=True)
+    _css_path = os.path.join(os.path.dirname(__file__), "styles.css")
+    with open(_css_path) as _f:
+        st.markdown(f"<style>{_f.read()}</style>", unsafe_allow_html=True)
 
     # ── Welcome bar ───────────────────────────────────────────────────────────
     user = get_current_user()
@@ -483,7 +428,6 @@ h1 { font-size: 2rem !important; }
             index=0,
             help="Auto-detect reads the city from your origin address. Override if detection is wrong.",
         )
-        # Persist so it survives reruns without being inside the form
         st.session_state["city_override"] = city_override
 
         st.divider()
@@ -546,12 +490,22 @@ h1 { font-size: 2rem !important; }
                     with col_btn:
                         if st.button(c["name"], key=f"saved_{c['id']}", use_container_width=True):
                             _quick_fill(c["origin"], c["destination"])
-                            st.rerun()
                     with col_del:
                         if st.button("✕", key=f"del_{c['id']}", help="Remove"):
-                            get_client().delete_saved_commute(c["id"])
+                            _del_session = supabase.auth.get_session()
+                            if _del_session and _del_session.access_token:
+                                get_client().delete_saved_commute(_del_session.access_token, c["id"])
                             st.rerun()
                 st.divider()
+
+        with st.expander("🧪 Dev tools", expanded=False):
+            if st.button("Reset alert cooldown", use_container_width=True):
+                st.session_state.pop("alerts_last_checked_at", None)
+                st.session_state.pop("pending_alerts", None)
+                st.session_state.pop("last_sms_sent_at", None)
+                st.rerun()
+            st.caption(f"Last check: {st.session_state.get('alerts_last_checked_at', 'never')}")
+            st.caption(f"Last SMS: {st.session_state.get('last_sms_sent_at', 'never')}")
 
         st.caption("Delhi Commute Agent · Powered by Gemini 2.5 Flash")
 
@@ -561,9 +515,41 @@ h1 { font-size: 2rem !important; }
     st.markdown("*AI-powered commute planning across Indian cities — real-time routes, weather, and smart timing*")
     st.divider()
 
+    # ── Proactive alerts — checked inline on each page load ──────────────────
+    _alert_user  = get_current_user()
+    _last_check  = st.session_state.get("alerts_last_checked_at")
+    _should_check = (
+        _last_check is None or
+        (datetime.now() - _last_check) > timedelta(minutes=15)
+    )
+    if _alert_user and _should_check:
+        try:
+            from services.memory_service import detect_patterns
+            from services.alert_service import _is_departure_window, generate_alerts
+            _history  = get_client().get_trip_history(_alert_user.id)
+            _patterns = detect_patterns(_history)
+            if _patterns and _is_departure_window(_patterns.get("usual_departure_hour")):
+                _alerts = run_async(generate_alerts(_patterns))
+                st.session_state["pending_alerts"] = _alerts
+                from services.alert_service import send_sms_alerts
+                _last_sms = st.session_state.get("last_sms_sent_at")
+                if _alerts and (not _last_sms or (datetime.now() - _last_sms) > timedelta(hours=2)):
+                    send_sms_alerts(_alerts)
+                    st.session_state["last_sms_sent_at"] = datetime.now()
+            else:
+                st.session_state["pending_alerts"] = []
+            st.session_state["alerts_last_checked_at"] = datetime.now()
+        except Exception as e:
+            st.sidebar.error(f"Alert check error: {e}")
+
+    for _alert in st.session_state.get("pending_alerts", []):
+        if _alert["severity"] == "warning":
+            st.warning(f"**Heads up for your usual commute:** {_alert['message']}  \n_{_alert['suggestion']}_")
+        else:
+            st.info(f"**Commute update:** {_alert['message']}  \n_{_alert['suggestion']}_")
 
     # ── TABS ──────────────────────────────────────────────────────────────────
-    tab_plan, tab_chat = st.tabs(["🗺️  Plan Commute", "💬  Chat with Agent"])
+    tab_plan, tab_commutes, tab_chat = st.tabs(["🗺️  Plan Commute", "📊  My Commutes", "💬  Chat with Agent"])
 
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -571,7 +557,6 @@ h1 { font-size: 2rem !important; }
     # ══════════════════════════════════════════════════════════════════════════
     with tab_plan:
 
-        # ── Origin / Destination searchboxes (must be outside st.form for autocomplete) ──
         col_o, col_d = st.columns(2)
         with col_o:
             st.markdown("**🏠 From**")
@@ -594,10 +579,8 @@ h1 { font-size: 2rem !important; }
                 clear_on_submit=False,
             )
 
-        # ── Remaining inputs + submit (inside form to batch the submit action) ──
         with st.form("plan_form"):
             col_date, col_time, col_extra = st.columns([1, 1, 2])
-
             with col_date:
                 travel_date = st.date_input("📅 Date", value=date.today())
             with col_time:
@@ -607,14 +590,12 @@ h1 { font-size: 2rem !important; }
                     "💬 Extra context (optional)",
                     placeholder="e.g. carrying heavy luggage, it's raining outside…",
                 )
-
             submitted = st.form_submit_button(
                 "🔍  Plan My Commute", use_container_width=True, type="primary"
             )
 
         # ── Run agent on submit ───────────────────────────────────────────────
         if submitted:
-            # st_searchbox returns None until user selects; fall back to session default
             origin      = origin      or st.session_state.get("origin_input", "")
             destination = destination or st.session_state.get("destination_input", "")
             if not (origin or "").strip() or not (destination or "").strip():
@@ -623,9 +604,9 @@ h1 { font-size: 2rem !important; }
                 required_arrival = datetime.combine(travel_date, arrival_time).isoformat()
 
                 user_prefs = {
-                    "buffer_minutes":         buffer_minutes,
+                    "buffer_minutes":            buffer_minutes,
                     "prefer_comfort_over_speed": prefer_comfort,
-                    "max_walking_minutes":    max_walk,
+                    "max_walking_minutes":       max_walk,
                 }
 
                 with st.spinner("🤖 Agent is planning your commute…"):
@@ -652,20 +633,21 @@ h1 { font-size: 2rem !important; }
                             _session = supabase.auth.get_session()
                             if _session and _session.access_token:
                                 _log_trip_background(_session.access_token, _user.id, result, origin, destination)
+
                         # Geocode once and cache for maps + city detection
                         o_geo, d_geo = geocode_endpoints(origin, destination)
                         st.session_state["plan_o_geo"] = o_geo
                         st.session_state["plan_d_geo"] = d_geo
-                        # Detect city from geocode result
-                        auto_city = extract_city_from_geo(o_geo)
+                        auto_city   = extract_city_from_geo(o_geo)
                         chosen_city = st.session_state.get("city_override", "Auto-detect")
                         st.session_state["detected_city"] = (
                             chosen_city if chosen_city != "Auto-detect" else auto_city
                         )
-                        # Comfort advisory — infer metro line from recommended route steps
+
+                        # Comfort advisory
                         try:
                             from agent.tools import _get_comfort_advisory
-                            rec = result.recommended_route or {}
+                            rec        = result.recommended_route or {}
                             metro_line = "Generic"
                             for step in rec.get("steps", []):
                                 if step.get("mode") == "metro" and step.get("line"):
@@ -681,15 +663,16 @@ h1 { font-size: 2rem !important; }
                                 except Exception:
                                     dep_iso = required_arrival
                             comfort_inp = {
-                                "lat": o_geo["lat"] if o_geo else None,
-                                "lon": o_geo["lng"] if o_geo else None,
-                                "metro_line": metro_line,
+                                "lat":               o_geo["lat"] if o_geo else None,
+                                "lon":               o_geo["lng"] if o_geo else None,
+                                "metro_line":        metro_line,
                                 "departure_time_iso": dep_iso,
                             }
                             comfort_data = run_async(_get_comfort_advisory(comfort_inp))
                             st.session_state["comfort_advisory"] = comfort_data
                         except Exception:
                             st.session_state.pop("comfort_advisory", None)
+
                     except Exception as e:
                         st.error(f"Agent error: {e}")
                         st.session_state.pop("plan_result", None)
@@ -698,8 +681,25 @@ h1 { font-size: 2rem !important; }
         if result := st.session_state.get("plan_result"):
             st.divider()
 
+            # Route preview card
+            _po = st.session_state.get("plan_origin", "")
+            _pd = st.session_state.get("plan_destination", "")
+            _o_html = _po if _po else '<span class="rp-text-muted">Unknown origin</span>'
+            _d_html = _pd if _pd else '<span class="rp-text-muted">Unknown destination</span>'
+            st.markdown(
+                f"""
+<div class="rp-wrap">
+  <div class="rp-card">
+    <div class="rp-endpoint"><span class="rp-dot rp-dot-o"></span><span class="rp-text">{_o_html}</span></div>
+    <div class="rp-arrow">→</div>
+    <div class="rp-endpoint"><span class="rp-dot rp-dot-d"></span><span class="rp-text">{_d_html}</span></div>
+  </div>
+</div>""",
+                unsafe_allow_html=True,
+            )
+
             # City detection banner
-            detected_city = st.session_state.get("detected_city", "unknown")
+            detected_city     = st.session_state.get("detected_city", "unknown")
             city_override_val = st.session_state.get("city_override", "Auto-detect")
             if detected_city and detected_city != "unknown":
                 source_note = " (manually selected)" if city_override_val != "Auto-detect" else " (auto-detected)"
@@ -707,12 +707,11 @@ h1 { font-size: 2rem !important; }
 
             # Row 1: Weather | Leave-by | Urgency
             r1c1, r1c2, r1c3 = st.columns([2, 2, 1])
-
             with r1c1:
-                wx   = result.weather_summary or "Weather data not available."
-                risk = result.risk_score
+                wx      = result.weather_summary or "Weather data not available."
+                risk    = result.risk_score
                 wx_icon = "🌤️" if risk < 0.3 else ("🌧️" if risk < 0.6 else "⛈️")
-                _wx_city = st.session_state.get("detected_city") or ""
+                _wx_city  = st.session_state.get("detected_city") or ""
                 _wx_label = f"Weather in {_wx_city}" if _wx_city and _wx_city != "unknown" else "Weather"
                 if risk < 0.3:
                     st.success(f"{wx_icon} **{_wx_label}** — {wx}")
@@ -720,7 +719,6 @@ h1 { font-size: 2rem !important; }
                     st.warning(f"{wx_icon} **{_wx_label}** — {wx}")
                 else:
                     st.error(f"{wx_icon} **{_wx_label}** — {wx}")
-
             with r1c2:
                 if result.leave_by:
                     st.metric(
@@ -730,7 +728,6 @@ h1 { font-size: 2rem !important; }
                     )
                 else:
                     st.info("See agent recommendation for departure time.")
-
             with r1c3:
                 urgency_icons = {"LOW": "🟢", "MEDIUM": "🟡", "HIGH": "🟠", "CRITICAL": "🔴"}
                 icon = urgency_icons.get(result.urgency.upper(), "⚪")
@@ -742,20 +739,17 @@ h1 { font-size: 2rem !important; }
 
             st.divider()
 
-            # Row 2: Agent recommendation — summary + expandable full text
+            # Agent recommendation
             st.markdown("### 🤖 Agent Recommendation")
-
-            # Show only the first paragraph/block as the headline summary
             paragraphs = [p.strip() for p in result.explanation.split("\n\n") if p.strip()]
             if paragraphs:
-                st.info(paragraphs[0])          # first paragraph prominent
+                st.info(paragraphs[0])
                 if len(paragraphs) > 1:
                     with st.expander("Full analysis", expanded=False):
                         st.markdown("\n\n".join(paragraphs[1:]))
             else:
                 st.info(result.explanation[:300] + ("…" if len(result.explanation) > 300 else ""))
 
-            # Disruptions
             for d in result.disruptions:
                 st.warning(d, icon="🚨")
 
@@ -765,75 +759,51 @@ h1 { font-size: 2rem !important; }
                     for i, step in enumerate(result.tool_trace, 1):
                         name    = step.get("name", "")
                         summary = step.get("summary", "")
-                        st.markdown(
-                            f"`[{i}]` **{name}** &nbsp;→&nbsp; {summary}",
-                            unsafe_allow_html=True,
-                        )
+                        st.markdown(f"`[{i}]` **{name}** &nbsp;→&nbsp; {summary}", unsafe_allow_html=True)
             elif result.tool_calls_made:
                 with st.expander("🔍 Agent reasoning trace", expanded=False):
                     for i, name in enumerate(result.tool_calls_made, 1):
                         st.markdown(f"`[{i}]` **{name}**")
-                    
-            # ── Comfort Advisory (heat index + crowding + proactive alert) ──────
+
+            # Comfort Advisory
             comfort = st.session_state.get("comfort_advisory")
             if comfort:
                 st.divider()
                 st.markdown("### 🌡️ Comfort Advisory")
-
                 ca_col1, ca_col2 = st.columns(2)
-
                 with ca_col1:
                     heat_cat   = comfort.get("heat_category", "comfortable")
                     heat_index = comfort.get("heat_index_c", "—")
                     heat_adv   = comfort.get("heat_advisory", "")
-                    heat_color = {
-                        "comfortable": "🟢",
-                        "warm":        "🟡",
-                        "hot":         "🟠",
-                        "dangerous":   "🔴",
-                    }.get(heat_cat, "⚪")
-                    st.metric(
-                        label=f"{heat_color} Heat Index",
-                        value=f"{heat_index}°C",
-                        help=heat_adv,
-                    )
+                    heat_color = {"comfortable": "🟢", "warm": "🟡", "hot": "🟠", "dangerous": "🔴"}.get(heat_cat, "⚪")
+                    st.metric(label=f"{heat_color} Heat Index", value=f"{heat_index}°C", help=heat_adv)
                     st.caption(heat_adv)
-
                 with ca_col2:
                     crowd_lbl  = comfort.get("crowding_label", "unknown")
                     crowd_occ  = comfort.get("crowding_occupancy", 0)
                     metro_line = comfort.get("metro_line", "Metro")
-                    crowd_icon = {
-                        "empty":        "🟢",
-                        "moderate":     "🟡",
-                        "crowded":      "🟠",
-                        "very crowded": "🔴",
-                    }.get(crowd_lbl, "⚪")
+                    crowd_icon = {"empty": "🟢", "moderate": "🟡", "crowded": "🟠", "very crowded": "🔴"}.get(crowd_lbl, "⚪")
                     peak_badge = " (Peak)" if comfort.get("is_peak") else " (Off-peak)"
                     st.metric(
                         label=f"{crowd_icon} {metro_line} Crowding",
                         value=f"{crowd_lbl.title()}{peak_badge}",
                         help=f"{int(crowd_occ * 100)}% occupancy",
                     )
-                    coach_tip = comfort.get("coach_tip", "")
-                    if coach_tip:
+                    if coach_tip := comfort.get("coach_tip", ""):
                         st.caption(f"💡 {coach_tip}")
-
                 if reasoning := comfort.get("reasoning"):
                     st.info(reasoning, icon="🤖")
-
                 if early := comfort.get("early_departure"):
-                    suggest_time = early.get("suggested_departure", "")
-                    reason_text  = early.get("reason", "")
-                    mins_saved   = early.get("minutes_saved", 0)
                     st.warning(
-                        f"**Leave earlier — {suggest_time}** saves ~{mins_saved} min of crowding.  \n"
-                        f"{reason_text}",
+                        f"**Leave earlier — {early.get('suggested_departure', '')}** "
+                        f"saves ~{early.get('minutes_saved', 0)} min of crowding.  \n"
+                        f"{early.get('reason', '')}",
                         icon="⚡",
                     )
+
             st.divider()
-            
-            # ── Save this commute ──────────────────────────────────────────────
+
+            # Save this commute
             with st.expander("🔖 Save this commute", expanded=False):
                 if require_auth("saved commutes"):
                     _origin      = st.session_state.get("plan_origin", "")
@@ -843,12 +813,11 @@ h1 { font-size: 2rem !important; }
                     with save_col1:
                         save_name = st.text_input(
                             "Name", value=_default_name, key="save_commute_name",
-                            label_visibility="collapsed",
-                            placeholder="e.g. Home → Office",
+                            label_visibility="collapsed", placeholder="e.g. Home → Office",
                         )
                     with save_col2:
                         if st.button("Save", key="save_commute_btn", use_container_width=True):
-                            _u = get_current_user()
+                            _u       = get_current_user()
                             _session = supabase.auth.get_session()
                             if save_name.strip() and _u and _session and _session.access_token:
                                 ok = get_client().save_commute(
@@ -867,9 +836,8 @@ h1 { font-size: 2rem !important; }
 
             st.divider()
 
-            # Row 3: Route options in tabs (full width per route)
+            # Route options
             st.markdown("### 🛣️ Route Options")
-
             routes = []
             if result.recommended_route:
                 routes.append(result.recommended_route)
@@ -892,7 +860,6 @@ h1 { font-size: 2rem !important; }
                     with tab:
                         render_route_card(route, is_best=is_best)
 
-                        # ── Route map (per tab) ───────────────────────────────
                         if o_geo and d_geo:
                             polyline = route.get("overview_polyline", "")
                             fmap = build_route_map(
@@ -905,13 +872,12 @@ h1 { font-size: 2rem !important; }
                             st_folium(fmap, use_container_width=True, height=380,
                                       returned_objects=[], key=f"route_map_{i}")
 
-                        # ── Cab booking buttons + QR codes ───────────────────
                         route_label = route.get("label", "").lower()
                         if "cab" in route_label:
-                            est_cost = route.get("total_cost_rupees", 0)
-                            st.markdown(f"**🚕 Book this ride** · Estimated ₹{est_cost}")
+                            est_cost   = route.get("total_cost_rupees", 0)
                             origin_txt = st.session_state.get("plan_origin", "")
                             dest_txt   = st.session_state.get("plan_destination", "")
+                            st.markdown(f"**🚕 Book this ride** · Estimated ₹{est_cost}")
                             uber_url = _build_uber_link(origin_txt, dest_txt, o_geo, d_geo)
                             ola_url  = _build_ola_link(origin_txt, dest_txt, o_geo, d_geo)
 
@@ -943,16 +909,85 @@ h1 { font-size: 2rem !important; }
 
 
     # ══════════════════════════════════════════════════════════════════════════
-    # TAB 2 — CHAT
+    # TAB 2 — MY COMMUTES
+    # ══════════════════════════════════════════════════════════════════════════
+    with tab_commutes:
+        if not require_auth("My Commutes"):
+            pass
+        else:
+            _mc_user  = get_current_user()
+            _mc_trips = get_client().get_trip_history(_mc_user.id, limit=50)
+
+            if len(_mc_trips) < 5:
+                st.info(
+                    "Plan a few more commutes to unlock insights. "
+                    f"({len(_mc_trips)}/5 trips logged)",
+                    icon="📊",
+                )
+            else:
+                _mc_month = datetime.now().strftime("%Y-%m")
+                _mc_spend = get_client().get_monthly_spend(_mc_user.id, _mc_month)
+
+                from services.memory_service import detect_savings_opportunities
+                _mc_opps = detect_savings_opportunities(_mc_spend, _mc_trips)
+
+                _mc_total       = _mc_spend.get("total_spent", 0)
+                _mc_saving      = sum(o["saving"] for o in _mc_opps[:3])
+                _mc_month_label = datetime.now().strftime("%B %Y")
+
+                if _mc_saving > 0 and _mc_opps:
+                    st.success(
+                        f"**{_mc_month_label}:** You've spent ₹{_mc_total} on commutes. "
+                        f"Switching to metro on your {min(3, len(_mc_opps))} most frequent routes "
+                        f"would save **₹{_mc_saving}/month**.",
+                        icon="💡",
+                    )
+                elif _mc_total > 0:
+                    st.info(
+                        f"**{_mc_month_label}:** You've spent ₹{_mc_total} on commutes "
+                        f"across {_mc_spend.get('trip_count', 0)} trips.",
+                        icon="💡",
+                    )
+                else:
+                    st.info("No spend recorded for this month yet.", icon="💡")
+
+                _mc_by_mode = _mc_spend.get("by_mode", {})
+                if _mc_by_mode:
+                    st.markdown(f"### Monthly Spend — {_mc_month_label}")
+                    import pandas as pd
+                    _mc_chart = pd.DataFrame({
+                        "Mode":      list(_mc_by_mode.keys()),
+                        "Spend (₹)": list(_mc_by_mode.values()),
+                    }).set_index("Mode")
+                    st.bar_chart(_mc_chart, use_container_width=True, height=260)
+                    _mc_cols = st.columns(len(_mc_by_mode))
+                    for _col, (_mode, _amt) in zip(_mc_cols, _mc_by_mode.items()):
+                        _col.metric(f"{_mode.title()} spend", f"₹{_amt}")
+
+                st.divider()
+
+                if _mc_opps:
+                    st.markdown("### 💰 Savings Opportunities")
+                    st.caption("Trips where you took a cab but metro was available or cheaper.")
+                    import pandas as pd
+                    _opp_df = pd.DataFrame(_mc_opps[:10])[
+                        ["date", "route", "cab_cost", "metro_cost", "saving"]
+                    ]
+                    _opp_df.columns = ["Date", "Route", "Cab Cost (₹)", "Metro Cost (₹)", "Saving (₹)"]
+                    st.dataframe(_opp_df, use_container_width=True, hide_index=True)
+                else:
+                    st.success("No savings opportunities found — you're already commuting efficiently!", icon="✅")
+
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # TAB 3 — CHAT
     # ══════════════════════════════════════════════════════════════════════════
     with tab_chat:
         st.markdown("Ask anything about your commute — the agent has access to real-time weather, routes, and metro data.")
 
-        # Initialise history
         if "chat_history" not in st.session_state:
             st.session_state["chat_history"] = []
 
-        # Display existing messages
         for msg in st.session_state["chat_history"]:
             role = msg["role"]
             text = msg["text"]
@@ -963,7 +998,6 @@ h1 { font-size: 2rem !important; }
 
         st.markdown("<br>", unsafe_allow_html=True)
 
-        # Input
         with st.form("chat_form", clear_on_submit=True):
             chat_col1, chat_col2 = st.columns([5, 1])
             with chat_col1:
@@ -976,9 +1010,7 @@ h1 { font-size: 2rem !important; }
                 chat_submitted = st.form_submit_button("Send", use_container_width=True, type="primary")
 
         if chat_submitted and user_input.strip():
-            # Build history for agent (only last 10 turns to keep context short)
             history = st.session_state["chat_history"][-10:]
-
             st.session_state["chat_history"].append({"role": "user", "text": user_input})
 
             with st.spinner("Agent is thinking…"):

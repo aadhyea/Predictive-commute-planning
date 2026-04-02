@@ -1,0 +1,575 @@
+/* ============================================================
+   India Commute Agent — Global Stylesheet
+   Theme: Earthy tones · Polished SaaS · Animated
+   Font: Plus Jakarta Sans (Google Fonts)
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
+
+/* ── CSS variables ───────────────────────────────────────────── */
+:root {
+  --bg:           #F7F3EE;
+  --bg-card:      #FFFFFF;
+  --bg-sidebar:   #F0EBE3;
+  --bg-subtle:    #EDE8E0;
+
+  --text-primary:   #2C1F14;
+  --text-secondary: #6B5744;
+  --text-muted:     #A08C7B;
+
+  --accent:         #B5541A;   /* terracotta */
+  --accent-hover:   #943F10;
+  --accent-soft:    #F2E4D8;
+
+  --green:          #5C8A5A;
+  --green-soft:     #E4EFE4;
+  --red:            #B04040;
+  --red-soft:       #F5E4E4;
+  --amber:          #B07820;
+  --amber-soft:     #FBF0D8;
+
+  --border:         #DDD4C8;
+  --border-focus:   #B5541A;
+  --shadow-sm:      0 1px 4px rgba(44,31,20,0.07);
+  --shadow-md:      0 4px 16px rgba(44,31,20,0.10);
+  --shadow-lg:      0 8px 32px rgba(44,31,20,0.13);
+
+  --radius-sm:  8px;
+  --radius-md:  12px;
+  --radius-lg:  18px;
+  --radius-pill:40px;
+
+  --transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+
+/* ── Keyframes ───────────────────────────────────────────────── */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(18px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -600px 0; }
+  100% { background-position:  600px 0; }
+}
+
+@keyframes pulse-dot {
+  0%, 100% { transform: scale(1);   opacity: 1; }
+  50%       { transform: scale(1.4); opacity: 0.7; }
+}
+
+
+/* ── Base / Reset ────────────────────────────────────────────── */
+html, body, [class*="css"] {
+  font-family: 'Plus Jakarta Sans', sans-serif !important;
+  color: var(--text-primary) !important;
+}
+
+.stApp {
+  background-color: var(--bg) !important;
+}
+
+.main .block-container {
+  padding-top: 1.8rem !important;
+  padding-bottom: 3rem !important;
+  max-width: 1100px;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar       { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg-subtle); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+
+/* ── Typography ──────────────────────────────────────────────── */
+h1 {
+  font-size: 2rem !important;
+  font-weight: 800 !important;
+  color: var(--text-primary) !important;
+  letter-spacing: -0.03em !important;
+  animation: slideDown 0.5s var(--transition) both;
+}
+
+h2, h3 {
+  font-weight: 700 !important;
+  color: var(--text-primary) !important;
+  letter-spacing: -0.02em !important;
+}
+
+p, li, span, label, div {
+  color: var(--text-primary);
+}
+
+.stMarkdown p {
+  color: var(--text-secondary) !important;
+  line-height: 1.65;
+}
+
+em, i {
+  color: var(--text-muted) !important;
+}
+
+
+/* ── Sidebar ─────────────────────────────────────────────────── */
+[data-testid="stSidebar"] {
+  background: var(--bg-sidebar) !important;
+  border-right: 1px solid var(--border) !important;
+}
+
+[data-testid="stSidebar"] .block-container {
+  padding-top: 1.5rem !important;
+}
+
+[data-testid="stSidebar"] h2,
+[data-testid="stSidebar"] h3,
+[data-testid="stSidebar"] .stMarkdown p {
+  color: var(--text-primary) !important;
+}
+
+[data-testid="stSidebar"] hr {
+  border-color: var(--border) !important;
+}
+
+
+/* ── Buttons ─────────────────────────────────────────────────── */
+.stButton > button {
+  font-family: 'Plus Jakarta Sans', sans-serif !important;
+  font-weight: 600 !important;
+  font-size: 0.875rem !important;
+  border-radius: var(--radius-sm) !important;
+  border: 1px solid var(--border) !important;
+  background: var(--bg-card) !important;
+  color: var(--text-primary) !important;
+  transition: all var(--transition) !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+
+.stButton > button:hover {
+  background: var(--accent-soft) !important;
+  border-color: var(--accent) !important;
+  color: var(--accent) !important;
+  transform: translateY(-1px) !important;
+  box-shadow: var(--shadow-md) !important;
+}
+
+.stButton > button:active {
+  transform: translateY(0) !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+
+/* Primary button (form submit) */
+.stButton > button[kind="primary"],
+button[data-testid="baseButton-primary"] {
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+  color: #FFFFFF !important;
+  font-size: 0.95rem !important;
+  letter-spacing: 0.01em !important;
+}
+
+.stButton > button[kind="primary"]:hover,
+button[data-testid="baseButton-primary"]:hover {
+  background: var(--accent-hover) !important;
+  border-color: var(--accent-hover) !important;
+  color: #FFFFFF !important;
+}
+
+
+/* ── Form inputs ─────────────────────────────────────────────── */
+.stTextInput > div > div > input,
+.stNumberInput > div > div > input,
+.stSelectbox > div > div,
+.stDateInput > div > div > input,
+.stTimeInput > div > div > input {
+  font-family: 'Plus Jakarta Sans', sans-serif !important;
+  background: var(--bg-card) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius-sm) !important;
+  color: var(--text-primary) !important;
+  transition: border-color var(--transition), box-shadow var(--transition) !important;
+}
+
+.stTextInput > div > div > input:focus,
+.stNumberInput > div > div > input:focus {
+  border-color: var(--border-focus) !important;
+  box-shadow: 0 0 0 3px rgba(181,84,26,0.12) !important;
+  outline: none !important;
+}
+
+.stTextInput label, .stSelectbox label,
+.stDateInput label, .stTimeInput label {
+  font-weight: 600 !important;
+  font-size: 0.8rem !important;
+  color: var(--text-secondary) !important;
+  letter-spacing: 0.04em !important;
+  text-transform: uppercase !important;
+}
+
+
+/* ── Tabs ────────────────────────────────────────────────────── */
+.stTabs [data-baseweb="tab-list"] {
+  background: var(--bg-subtle) !important;
+  border-radius: var(--radius-md) !important;
+  padding: 4px !important;
+  gap: 2px !important;
+  border-bottom: none !important;
+}
+
+.stTabs [data-baseweb="tab"] {
+  font-family: 'Plus Jakarta Sans', sans-serif !important;
+  font-weight: 600 !important;
+  font-size: 0.875rem !important;
+  border-radius: var(--radius-sm) !important;
+  color: var(--text-secondary) !important;
+  transition: all var(--transition) !important;
+  padding: 8px 20px !important;
+}
+
+.stTabs [aria-selected="true"] {
+  background: var(--bg-card) !important;
+  color: var(--accent) !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+
+.stTabs [data-baseweb="tab-panel"] {
+  padding-top: 1.2rem !important;
+  animation: fadeIn 0.3s ease both;
+}
+
+
+/* ── Metrics ─────────────────────────────────────────────────── */
+[data-testid="stMetricValue"] {
+  font-size: 1.3rem !important;
+  font-weight: 700 !important;
+  color: var(--text-primary) !important;
+}
+
+[data-testid="stMetricLabel"] {
+  font-size: 0.75rem !important;
+  font-weight: 600 !important;
+  color: var(--text-muted) !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.05em !important;
+}
+
+[data-testid="stMetric"] {
+  background: var(--bg-card) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius-md) !important;
+  padding: 14px 16px !important;
+  box-shadow: var(--shadow-sm) !important;
+  transition: box-shadow var(--transition), transform var(--transition) !important;
+}
+
+[data-testid="stMetric"]:hover {
+  box-shadow: var(--shadow-md) !important;
+  transform: translateY(-2px) !important;
+}
+
+
+/* ── Alerts / Info boxes ─────────────────────────────────────── */
+.stAlert {
+  border-radius: var(--radius-md) !important;
+  border: none !important;
+  font-weight: 500 !important;
+  animation: slideUp 0.3s ease both;
+}
+
+[data-testid="stAlert"][data-baseweb="notification"] {
+  font-family: 'Plus Jakarta Sans', sans-serif !important;
+}
+
+div[data-testid="stAlert"] > div {
+  border-radius: var(--radius-md) !important;
+}
+
+/* Info */
+.stAlert[data-type="info"], div[data-baseweb="notification"][kind="info"] {
+  background: var(--amber-soft) !important;
+  color: var(--amber) !important;
+}
+
+/* Success */
+.stAlert[data-type="success"] {
+  background: var(--green-soft) !important;
+  color: var(--green) !important;
+}
+
+/* Warning */
+.stAlert[data-type="warning"] {
+  background: var(--amber-soft) !important;
+  color: var(--amber) !important;
+}
+
+/* Error */
+.stAlert[data-type="error"] {
+  background: var(--red-soft) !important;
+  color: var(--red) !important;
+}
+
+
+/* ── Divider ─────────────────────────────────────────────────── */
+hr {
+  border-color: var(--border) !important;
+  opacity: 0.7 !important;
+}
+
+
+/* ── Expanders ───────────────────────────────────────────────── */
+.streamlit-expanderHeader {
+  font-family: 'Plus Jakarta Sans', sans-serif !important;
+  font-weight: 600 !important;
+  font-size: 0.9rem !important;
+  color: var(--text-secondary) !important;
+  background: var(--bg-subtle) !important;
+  border-radius: var(--radius-sm) !important;
+  transition: background var(--transition) !important;
+}
+
+.streamlit-expanderHeader:hover {
+  background: var(--accent-soft) !important;
+  color: var(--accent) !important;
+}
+
+.streamlit-expanderContent {
+  border: 1px solid var(--border) !important;
+  border-top: none !important;
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm) !important;
+  background: var(--bg-card) !important;
+  animation: slideDown 0.2s ease both;
+}
+
+
+/* ── Slider ──────────────────────────────────────────────────── */
+.stSlider [data-baseweb="slider"] [role="slider"] {
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+}
+
+.stSlider [data-baseweb="slider"] [data-testid="stThumbValue"] {
+  color: var(--accent) !important;
+  font-weight: 600 !important;
+}
+
+
+/* ── Toggle ──────────────────────────────────────────────────── */
+.stToggle [data-baseweb="toggle"] [data-checked="true"] {
+  background: var(--accent) !important;
+}
+
+
+/* ── Spinner ─────────────────────────────────────────────────── */
+.stSpinner > div {
+  border-top-color: var(--accent) !important;
+}
+
+
+/* ── Caption / small text ────────────────────────────────────── */
+.stCaption, small, .stCaption p {
+  color: var(--text-muted) !important;
+  font-size: 0.78rem !important;
+}
+
+
+/* ── Urgency badges ──────────────────────────────────────────── */
+.badge {
+  display: inline-block;
+  padding: 4px 14px;
+  border-radius: var(--radius-pill);
+  font-weight: 700;
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  animation: fadeIn 0.4s ease both;
+}
+.badge-low      { background: var(--green-soft); color: var(--green); }
+.badge-medium   { background: var(--amber-soft); color: var(--amber); }
+.badge-high     { background: #F5EAD8;           color: #8C4A10; }
+.badge-critical { background: var(--red-soft);   color: var(--red); }
+
+
+/* ── Route cards ─────────────────────────────────────────────── */
+.route-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 18px 20px;
+  margin-bottom: 14px;
+  background: var(--bg-card);
+  color: var(--text-primary) !important;
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow var(--transition), transform var(--transition);
+  animation: slideUp 0.35s ease both;
+}
+
+.route-card:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+
+.route-card-best {
+  border: 2px solid var(--accent);
+  border-radius: var(--radius-lg);
+  padding: 18px 20px;
+  margin-bottom: 14px;
+  background: var(--accent-soft);
+  color: var(--text-primary) !important;
+  box-shadow: var(--shadow-md);
+  transition: box-shadow var(--transition), transform var(--transition);
+  animation: slideUp 0.3s ease both;
+}
+
+.route-card-best:hover {
+  box-shadow: var(--shadow-lg);
+  transform: translateY(-3px);
+}
+
+.route-label {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-primary) !important;
+  margin-bottom: 10px;
+  letter-spacing: -0.01em;
+}
+
+
+/* ── Chat bubbles ────────────────────────────────────────────── */
+.chat-user {
+  background: var(--accent-soft);
+  border: 1px solid var(--border);
+  border-radius: 14px 14px 2px 14px;
+  padding: 10px 16px;
+  margin: 6px 0;
+  text-align: right;
+  font-size: 0.9rem;
+  color: var(--text-primary);
+  animation: slideUp 0.25s ease both;
+}
+
+.chat-agent {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 14px 14px 14px 2px;
+  padding: 10px 16px;
+  margin: 6px 0;
+  font-size: 0.9rem;
+  color: var(--text-primary);
+  animation: slideUp 0.25s ease both;
+}
+
+
+/* ── Route preview card (horizontal pill) ────────────────────── */
+.rp-wrap {
+  display: flex;
+  justify-content: center;
+  margin: 6px 0 18px 0;
+  animation: slideDown 0.4s ease both;
+}
+
+.rp-card {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  padding: 10px 24px;
+  background: var(--bg-card);
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow var(--transition);
+}
+
+.rp-card:hover {
+  box-shadow: var(--shadow-md);
+}
+
+.rp-endpoint { display: flex; align-items: center; gap: 9px; }
+
+.rp-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.rp-dot-o {
+  background: var(--green);
+  animation: pulse-dot 2.5s ease-in-out infinite;
+}
+
+.rp-dot-d {
+  background: var(--red);
+}
+
+.rp-text {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 260px;
+}
+
+.rp-text-muted {
+  color: var(--text-muted);
+  font-style: italic;
+  font-weight: 400;
+}
+
+.rp-arrow {
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  flex-shrink: 0;
+}
+
+
+/* ── Selectbox ───────────────────────────────────────────────── */
+.stSelectbox [data-baseweb="select"] > div {
+  background: var(--bg-card) !important;
+  border-color: var(--border) !important;
+  border-radius: var(--radius-sm) !important;
+  font-family: 'Plus Jakarta Sans', sans-serif !important;
+  color: var(--text-primary) !important;
+  transition: border-color var(--transition), box-shadow var(--transition) !important;
+}
+
+.stSelectbox [data-baseweb="select"] > div:focus-within {
+  border-color: var(--border-focus) !important;
+  box-shadow: 0 0 0 3px rgba(181,84,26,0.12) !important;
+}
+
+[data-baseweb="popover"] {
+  border-radius: var(--radius-md) !important;
+  box-shadow: var(--shadow-lg) !important;
+  border: 1px solid var(--border) !important;
+  overflow: hidden !important;
+}
+
+[data-baseweb="menu"] {
+  background: var(--bg-card) !important;
+  font-family: 'Plus Jakarta Sans', sans-serif !important;
+}
+
+[data-baseweb="menu"] li {
+  color: var(--text-primary) !important;
+  transition: background var(--transition) !important;
+}
+
+[data-baseweb="menu"] li:hover {
+  background: var(--accent-soft) !important;
+}

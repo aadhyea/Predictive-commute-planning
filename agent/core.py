@@ -1,5 +1,5 @@
 """
-Delhi Commute Agent — core agentic loop (Gemini 2.0 Flash).
+Commute Agent — core agentic loop (Gemini 2.0 Flash).
 
 Uses the google-genai SDK with function calling to let Gemini autonomously:
   1. Gather data (weather, routes, metro status)
@@ -29,11 +29,13 @@ from config import settings
 from agent.prompts import COMMUTE_AGENT_SYSTEM_PROMPT, HINDI_LANGUAGE_INSTRUCTION
 from agent.tools import GEMINI_TOOLS, execute_tool
 from maps.google_maps_client import maps_client
+from services.memory_service import detect_patterns
+from services.hybrid_route_service import hybrid_route_service
 
 logger = logging.getLogger(__name__)
 
-MODEL         = "gemini-2.5-flash"
-MAX_TOKENS    = 4096
+MODEL           = "gemini-2.5-flash"
+MAX_TOKENS      = 4096
 MAX_TOOL_ROUNDS = 6
 
 
@@ -111,12 +113,11 @@ class CommuteAgent:
         extra_context: Optional[str] = None,
         user_id: Optional[str] = None,
         language: Optional[str] = None,
-    ) -> CommuteRecommendation:
+    ) -> "CommuteRecommendation":
         user_prefs    = user_prefs or {}
         departure_str = departure_time or datetime.now().isoformat()
 
-        # Geocode origin upfront so we can pass exact coordinates to get_weather.
-        # If geocoding fails we skip weather gracefully (no Delhi fallback).
+        # ── Geocode origin upfront ────────────────────────────────────────────
         origin_lat: Optional[float] = None
         origin_lng: Optional[float] = None
         try:
@@ -127,11 +128,34 @@ class CommuteAgent:
         except Exception as e:
             logger.warning(f"Could not geocode origin '{origin}' for weather: {e}")
 
+        # ── Pre-loop memory fetch ─────────────────────────────────────────────
+        tool_calls_made: List[str] = []
+        tool_results_store: List[Dict] = []
+        failed_tools: List[str] = []
+
+        patterns: Optional[Dict[str, Any]] = None
+        memory_context: str = ""
+
+        if user_id is None:
+            # Guest — no history lookup, no personalisation
+            pass
+        else:
+            patterns, history_result = await self._fetch_user_patterns(user_id)
+            tool_calls_made.append("get_user_history")
+            tool_results_store.append({"name": "get_user_history", "result": history_result})
+            memory_context = self._build_memory_context(patterns)
+
+            # Start proactive alert scheduler (non-blocking, guards against re-spawn)
+            from services.alert_service import start_alert_scheduler
+            if patterns:
+                start_alert_scheduler(patterns)
+
         user_message = self._build_user_message(
             origin, destination, required_arrival, departure_str, user_prefs, extra_context,
             user_id=user_id,
             origin_lat=origin_lat,
             origin_lng=origin_lng,
+            memory_context=memory_context,
         )
 
         config = self._make_config(language)
@@ -139,10 +163,33 @@ class CommuteAgent:
         contents: List[types.Content] = [
             types.Content(role="user", parts=[types.Part(text=user_message)])
         ]
-        tool_calls_made: List[str] = []
-        tool_results_store: List[Dict] = []   # raw dicts for result extraction
-        failed_tools: List[str] = []          # tools that returned errors/empty
 
+        # Push patterns to the scoring singleton; always clear in finally.
+        hybrid_route_service.set_user_patterns(patterns)
+        try:
+            return await self._run_agent_loop(
+                contents=contents,
+                tool_calls_made=tool_calls_made,
+                tool_results_store=tool_results_store,
+                failed_tools=failed_tools,
+                origin=origin,
+                destination=destination,
+                config=config,
+            )
+        finally:
+            hybrid_route_service.set_user_patterns(None)
+
+    async def _run_agent_loop(
+        self,
+        contents: List[types.Content],
+        tool_calls_made: List[str],
+        tool_results_store: List[Dict],
+        failed_tools: List[str],
+        origin: str,
+        destination: str,
+        config: types.GenerateContentConfig,
+    ) -> "CommuteRecommendation":
+        """Inner agent loop — separated so the try/finally in plan_commute stays clean."""
         for round_num in range(MAX_TOOL_ROUNDS):
             response = self._client.models.generate_content(
                 model=MODEL,
@@ -164,21 +211,21 @@ class CommuteAgent:
                 # No function calls — Gemini is done
                 final_text = self._extract_text(candidate.content)
                 return self._build_result(
-                    explanation=    final_text,
-                    tool_results=   tool_results_store,
-                    tool_calls_made=tool_calls_made,
-                    failed_tools=   failed_tools,
-                    origin=         origin,
-                    destination=    destination,
+                    explanation=     final_text,
+                    tool_results=    tool_results_store,
+                    tool_calls_made= tool_calls_made,
+                    failed_tools=    failed_tools,
+                    origin=          origin,
+                    destination=     destination,
                 )
 
             # Execute all function calls and collect responses
             fn_response_parts: List[types.Part] = []
 
             for part in fn_calls:
-                fn       = part.function_call
-                fn_name  = fn.name
-                fn_args  = dict(fn.args) if fn.args else {}
+                fn      = part.function_call
+                fn_name = fn.name
+                fn_args = dict(fn.args) if fn.args else {}
                 tool_calls_made.append(fn_name)
 
                 logger.info(f"Tool call: {fn_name}({json.dumps(fn_args, default=str)[:120]})")
@@ -213,12 +260,12 @@ class CommuteAgent:
         # Loop exhausted — grab whatever text we have
         final_text = self._extract_text(contents[-1]) if contents else "No response generated."
         return self._build_result(
-            explanation=    final_text or "Agent loop limit reached.",
-            tool_results=   tool_results_store,
-            tool_calls_made=tool_calls_made,
-            failed_tools=   failed_tools,
-            origin=         origin,
-            destination=    destination,
+            explanation=     final_text or "Agent loop limit reached.",
+            tool_results=    tool_results_store,
+            tool_calls_made= tool_calls_made,
+            failed_tools=    failed_tools,
+            origin=          origin,
+            destination=     destination,
         )
 
     # ============================================
@@ -288,6 +335,7 @@ class CommuteAgent:
         user_id: Optional[str] = None,
         origin_lat: Optional[float] = None,
         origin_lng: Optional[float] = None,
+        memory_context: str = "",
     ) -> str:
         lines = [
             f"Plan my commute from **{origin}** to **{destination}**.",
@@ -314,13 +362,84 @@ class CommuteAgent:
         if extra_context:
             lines.append(f"Additional context: {extra_context}")
 
-        if user_id:
-            lines.append(
-                f"\nUser ID: {user_id} — call get_user_history with this ID to personalise the recommendation."
-            )
+        if memory_context:
+            lines.append(f"\n{memory_context}")
 
         lines.append(
             "\nPlease check current weather, fetch route options, and give me a clear recommendation."
+        )
+        return "\n".join(lines)
+
+    async def _fetch_user_patterns(
+        self, user_id: str
+    ) -> tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
+        """
+        Fetch trip history for user_id, run pattern detection, and return
+        (patterns, raw_result_dict) for injection into tool_results_store.
+        Returns (None, empty_result) on any failure.
+        """
+        try:
+            from database.supabase_client import get_client
+            trips = get_client().get_trip_history(user_id, limit=20)
+            patterns = detect_patterns(trips)
+            result = {
+                "trips": trips,
+                "count": len(trips),
+                "has_history": len(trips) > 0,
+                "patterns": patterns,
+            }
+            logger.info(
+                f"User history fetched: {len(trips)} trips, "
+                f"preferred_mode={patterns.get('preferred_mode') if patterns else None}"
+            )
+            return patterns, result
+        except Exception as e:
+            logger.warning(f"Could not fetch user history for personalisation: {e}")
+            return None, {"trips": [], "count": 0, "has_history": False, "patterns": None}
+
+    @staticmethod
+    def _build_memory_context(patterns: Optional[Dict[str, Any]]) -> str:
+        """
+        Convert detected patterns into a concise natural-language block that
+        is injected into the initial user message before the Gemini loop.
+        Returns an empty string for guests or users with no history.
+        """
+        if patterns is None:
+            return ""
+
+        lines = ["User memory context (retrieved from trip history):"]
+
+        if patterns.get("preferred_mode"):
+            mode_label = {
+                "cab":          "cab (Ola/Uber)",
+                "metro_hybrid": "metro hybrid",
+                "transit":      "public transit",
+            }.get(patterns["preferred_mode"], patterns["preferred_mode"])
+            lines.append(f"  • Preferred transport mode: {mode_label}")
+
+        if patterns.get("usual_duration_min"):
+            lines.append(f"  • Typical trip duration: {patterns['usual_duration_min']} min")
+
+        if patterns.get("peak_cab_usage"):
+            lines.append("  • Often takes cabs during peak hours (use this when timing is tight)")
+
+        if patterns.get("avg_cost_by_mode"):
+            cost_parts = [
+                f"{m}: ₹{c}" for m, c in patterns["avg_cost_by_mode"].items()
+            ]
+            lines.append(f"  • Average spend — {', '.join(cost_parts)}")
+
+        if patterns.get("route_frequency"):
+            top = list(patterns["route_frequency"].items())[:2]
+            freq_str = "; ".join(f"{r} ({n}x)" for r, n in top)
+            lines.append(f"  • Most frequent routes: {freq_str}")
+
+        if not patterns.get("has_reliable_data"):
+            lines.append("  • (Limited history — treat patterns as preliminary)")
+
+        lines.append(
+            "Use these patterns to open your explanation with one personalised insight "
+            "and to inform your route recommendation."
         )
         return "\n".join(lines)
 
@@ -340,11 +459,11 @@ class CommuteAgent:
         origin: str,
         destination: str,
         failed_tools: Optional[List[str]] = None,
-    ) -> CommuteRecommendation:
-        routes:     List[Dict] = []
-        leave_by:   Optional[str] = None
-        urgency:    str = "LOW"
-        risk_score: float = 0.0
+    ) -> "CommuteRecommendation":
+        routes:      List[Dict] = []
+        leave_by:    Optional[str] = None
+        urgency:     str = "LOW"
+        risk_score:  float = 0.0
         weather_summary: Optional[str] = None
 
         for tr in tool_results:
@@ -381,12 +500,12 @@ class CommuteAgent:
         if risk_score >= 0.85:
             urgency = "CRITICAL"
 
-        # Proactive cost nudge: if recommended route is cab but user has metro history on same O→D
+        # Proactive cost nudge
         cost_nudge = _build_cost_nudge(routes[0] if routes else None, tool_results, origin, destination)
         if cost_nudge:
             explanation = explanation + f"\n\n{cost_nudge}"
 
-        # Uncertainty flagging (Task 7.4): append a note for every tool that returned no data
+        # Uncertainty flagging (Task 7.4): note every tool that returned no data
         for fn in (failed_tools or []):
             explanation = explanation + f"\n\nNote: {fn} returned no data — this recommendation may be less accurate."
 
@@ -432,14 +551,14 @@ class CommuteAgent:
         )
 
 
-# ── Standalone helper (not a method) ─────────────────────────────────────────
+# ── Standalone helpers ────────────────────────────────────────────────────────
 
 def _route_key(location: str) -> str:
     return location.lower().strip().split(",")[0].strip()
 
 
 def _summarise_tool_result(name: str, result: Dict[str, Any]) -> str:
-    """One-line summary of a tool result for the reasoning trace UI."""
+    """One-line summary of a tool result for the reasoning trace UI (Task 7.1)."""
     if not result or "error" in result:
         return f"error: {result.get('error', 'no data')}"
 
@@ -467,8 +586,8 @@ def _summarise_tool_result(name: str, result: Dict[str, Any]) -> str:
         return f"leave by: {leave_by}, urgency: {urgency}"
 
     if name == "get_traffic_conditions":
-        level = result.get("traffic_level", "?")
-        delay = result.get("delay_seconds") or 0
+        level     = result.get("traffic_level", "?")
+        delay     = result.get("delay_seconds") or 0
         delay_min = int(delay) // 60
         return f"traffic: {level}, delay: {delay_min}min" if delay_min else f"traffic: {level}"
 
