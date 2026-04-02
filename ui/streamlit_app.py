@@ -463,6 +463,19 @@ def render_app():
             _quick_fill("Andheri Station, Mumbai", "Bandra Kurla Complex, Mumbai")
 
         st.divider()
+        st.markdown("### 🌐 Language")
+        language_choice = st.radio(
+            "Response language",
+            options=["English", "Hindi"],
+            index=0,
+            horizontal=True,
+            label_visibility="collapsed",
+        )
+        st.session_state["language"] = "hi" if language_choice == "Hindi" else "en"
+        if language_choice == "Hindi":
+            st.caption("Agent will respond in Hindi. Labels and numbers stay in English.")
+
+        st.divider()
 
         # ── Saved commutes (logged-in users only) ─────────────────────────────
         _sidebar_user = get_current_user()
@@ -608,6 +621,7 @@ def render_app():
                                 user_prefs=       user_prefs,
                                 extra_context=    extra_context or None,
                                 user_id=          _current_user.id if _current_user else None,
+                                language=         st.session_state.get("language", "en"),
                             )
                         )
                         st.session_state["plan_result"]      = result
@@ -744,10 +758,20 @@ def render_app():
             for d in result.disruptions:
                 st.warning(d, icon="🚨")
 
-            # Tools used (debug expandable)
-            if result.tool_calls_made:
-                with st.expander("🔧 Tools used by agent", expanded=False):
-                    st.write(" → ".join(result.tool_calls_made))
+            # Agent reasoning trace (Task 7.1)
+            if result.tool_trace:
+                with st.expander("🔍 Agent reasoning trace", expanded=False):
+                    for i, step in enumerate(result.tool_trace, 1):
+                        name    = step.get("name", "")
+                        summary = step.get("summary", "")
+                        st.markdown(
+                            f"`[{i}]` **{name}** &nbsp;→&nbsp; {summary}",
+                            unsafe_allow_html=True,
+                        )
+            elif result.tool_calls_made:
+                with st.expander("🔍 Agent reasoning trace", expanded=False):
+                    for i, name in enumerate(result.tool_calls_made, 1):
+                        st.markdown(f"`[{i}]` **{name}**")
                     
             # ── Comfort Advisory (heat index + crowding + proactive alert) ──────
             comfort = st.session_state.get("comfort_advisory")
@@ -1031,6 +1055,7 @@ def render_app():
                         get_agent().chat(
                             user_message=user_input,
                             history=history,
+                            language=st.session_state.get("language", "en"),
                         )
                     )
                 except Exception as e:
