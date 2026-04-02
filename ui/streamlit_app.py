@@ -742,31 +742,32 @@ def render_app():
                 "options_js": [], "key_react": f"dest_searchbox_react_{_t}",
             }
 
-        if st.button("🏠 Delhi: Rajiv Chowk → Cyber City", use_container_width=True):
-            _quick_fill("Rajiv Chowk Metro Station, Delhi", "Cyber City, Gurugram")
-            st.rerun()
-        if st.button("📍 Delhi: CP → Noida Sector 62", use_container_width=True):
-            _quick_fill("Connaught Place, New Delhi", "Noida Sector 62, Uttar Pradesh")
-            st.rerun()
-        if st.button("✈️ Bangalore: Indiranagar → Whitefield", use_container_width=True):
-            _quick_fill("Indiranagar, Bengaluru", "Whitefield, Bengaluru")
-            st.rerun()
-        if st.button("🌊 Mumbai: Andheri → Bandra Kurla Complex", use_container_width=True):
-            _quick_fill("Andheri Station, Mumbai", "Bandra Kurla Complex, Mumbai")
-            st.rerun()
+        with st.expander("⚡ Quick Fill", expanded=False):
+            if st.button("🏠 Delhi: Rajiv Chowk → Cyber City", use_container_width=True):
+                _quick_fill("Rajiv Chowk Metro Station, Delhi", "Cyber City, Gurugram")
+                st.rerun()
+            if st.button("📍 Delhi: CP → Noida Sector 62", use_container_width=True):
+                _quick_fill("Connaught Place, New Delhi", "Noida Sector 62, Uttar Pradesh")
+                st.rerun()
+            if st.button("✈️ Bangalore: Indiranagar → Whitefield", use_container_width=True):
+                _quick_fill("Indiranagar, Bengaluru", "Whitefield, Bengaluru")
+                st.rerun()
+            if st.button("🌊 Mumbai: Andheri → Bandra Kurla Complex", use_container_width=True):
+                _quick_fill("Andheri Station, Mumbai", "Bandra Kurla Complex, Mumbai")
+                st.rerun()
 
-        st.divider()
-        st.markdown("### 🌐 Language")
-        language_choice = st.radio(
-            "Response language",
-            options=["English", "Hindi"],
-            index=0,
-            horizontal=True,
-            label_visibility="collapsed",
-        )
-        st.session_state["language"] = "hi" if language_choice == "Hindi" else "en"
-        if language_choice == "Hindi":
-            st.caption("Agent will respond in Hindi. Labels and numbers stay in English.")
+        # ── Language section ──────────────────────────────────────────
+        with st.expander("🌐 Language", expanded=False):
+            language_choice = st.radio(
+                "Response language",
+                options=["English", "Hindi"],
+                index=0,
+                horizontal=True,
+                label_visibility="collapsed",
+            )
+            st.session_state["language"] = "hi" if language_choice == "Hindi" else "en"
+            if language_choice == "Hindi":
+                st.caption("Agent will respond in Hindi. Labels and numbers stay in English.")
 
         # ── Saved Commutes ────────────────────────────────────────────
         _sidebar_user = get_current_user()
