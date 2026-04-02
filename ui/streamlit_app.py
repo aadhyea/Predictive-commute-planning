@@ -30,6 +30,9 @@ from auth.supabase_auth import (
     sign_in_google, sign_out, handle_auth_callback,
 )
 from database.supabase_client import get_client, supabase
+import pytz
+
+ist = pytz.timezone("Asia/Kolkata")
 
 # ── Bootstrap (before any rendering) ─────────────────────────────────────────
 handle_auth_callback()
@@ -68,7 +71,7 @@ def _log_trip_background(access_token: str, user_id: str, result, origin: str, d
                 user_id=      user_id,
                 origin=       origin,
                 destination=  destination,
-                city=         route.get("city"),
+                city =        st.session_state.get("detected_city") or route.get("city"),
                 route_label=  route.get("label", ""),
                 mode=         _mode_from_label(route.get("label", "")),
                 duration_min= route.get("total_duration_minutes", 0),
@@ -619,10 +622,100 @@ def render_app():
         layout="wide",
         initial_sidebar_state="expanded",
     )
+
     # ── CSS ───────────────────────────────────────────────────────────────────
     _css_path = os.path.join(os.path.dirname(__file__), "styles.css")
     with open(_css_path, encoding="utf-8") as _f:
         st.markdown(f"<style>{_f.read()}</style>", unsafe_allow_html=True)
+
+    # ── Midnight Transit — supplemental CSS overrides ────────────────────────
+    st.markdown("""
+    <style>
+    .stApp { background-color: #060E22 !important; }
+
+    .stApp h1 {
+      color: #E8F4FD !important;
+      text-shadow: 0 0 40px rgba(0,194,255,0.2);
+    }
+    .stApp em {
+      color: rgba(0,194,255,0.75) !important;
+      font-style: italic !important;
+    }
+
+    [data-testid="stFormSubmitButton"] > button {
+      background: #00C2FF !important;
+      color: #060E22 !important;
+      border: none !important;
+      font-weight: 800 !important;
+      font-size: 1rem !important;
+      letter-spacing: 0.02em !important;
+      box-shadow: 0 0 24px rgba(0,194,255,0.35) !important;
+      border-radius: 10px !important;
+    }
+    [data-testid="stFormSubmitButton"] > button:hover {
+      background: #33CEFF !important;
+      color: #060E22 !important;
+      box-shadow: 0 0 32px rgba(0,194,255,0.5) !important;
+      transform: translateY(-1px) !important;
+    }
+
+    .stDateInput input, .stTimeInput input {
+      background: rgba(255,255,255,0.04) !important;
+      border: 1px solid rgba(0,194,255,0.12) !important;
+      color: #E8F4FD !important;
+      border-radius: 8px !important;
+    }
+    .stDateInput input:focus, .stTimeInput input:focus {
+      border-color: #00C2FF !important;
+      box-shadow: 0 0 0 3px rgba(0,194,255,0.15) !important;
+    }
+
+    .stTabs [aria-selected="true"] {
+      background: rgba(0,194,255,0.1) !important;
+      color: #00C2FF !important;
+      border-bottom: 2px solid #00C2FF !important;
+    }
+    .stTabs [data-baseweb="tab-list"] {
+      background: rgba(0,0,0,0.35) !important;
+      border: 1px solid rgba(0,194,255,0.08) !important;
+    }
+
+    div[data-testid="stAlert"] {
+      background: rgba(0,194,255,0.07) !important;
+      border-left: 3px solid #00C2FF !important;
+      border-radius: 10px !important;
+      color: #E8F4FD !important;
+    }
+    div[data-baseweb="notification"][kind="warning"],
+    .stAlert[data-type="warning"] {
+      background: rgba(245,158,11,0.08) !important;
+      border-left: 3px solid #F59E0B !important;
+      color: #F59E0B !important;
+    }
+    div[data-baseweb="notification"][kind="positive"],
+    .stAlert[data-type="success"] {
+      background: rgba(16,185,129,0.08) !important;
+      border-left: 3px solid #10B981 !important;
+      color: #10B981 !important;
+    }
+    div[data-baseweb="notification"][kind="negative"],
+    .stAlert[data-type="error"] {
+      background: rgba(239,68,68,0.08) !important;
+      border-left: 3px solid #EF4444 !important;
+      color: #EF4444 !important;
+    }
+
+    [data-testid="stMetricValue"] { color: #00C2FF !important; }
+    [data-testid="stDivider"] hr, hr { border-color: rgba(0,194,255,0.1) !important; }
+    .stSpinner p { color: rgba(232,244,253,0.6) !important; }
+    .stCaption p { color: rgba(232,244,253,0.35) !important; }
+
+    [data-testid="stCustomComponentV1"] > iframe {
+      background: transparent !important;
+      color-scheme: dark !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
     # ── Main page background image (sidebar excluded) ─────────────────────────
     _img_path = os.path.join(os.path.dirname(__file__), "assets", "image.png")
@@ -791,6 +884,8 @@ def render_app():
             if saved:
                 with st.expander("🔖 Saved Commutes", expanded=True):
                     for c in saved:
+                        raw_name = c["name"]
+                        display_name = raw_name if len(raw_name) <= 28 else raw_name[:26] + "…"
                         _mode_badge = {"cab": "🚕", "metro_hybrid": "🚇", "transit": "🚌"}.get(
                             c.get("mode", ""), ""
                         )
@@ -829,8 +924,14 @@ def render_app():
 
 
     # ── HEADER ────────────────────────────────────────────────────────────────
-    st.markdown('# 🧭 <span class="great-vibes-regular" style="font-size:2.8rem">Sherpa</span>', unsafe_allow_html=True)
-    st.markdown("*AI-powered commute planning across Indian cities — real-time routes, weather, and smart timing*")
+    st.markdown("""
+    <h1 style="font-size:2.2rem; font-weight:800; color:#E8F4FD; letter-spacing:-0.03em; margin-bottom:4px;">
+      🧭 <span style="font-family:'Great Vibes',cursive; font-size:2.8rem; font-weight:400;">Sherpa</span>
+    </h1>
+    <p style="color:rgba(0,194,255,0.75); font-style:italic; font-size:0.95rem; margin-top:0; margin-bottom:1rem;">
+      AI-powered commute planning across Indian cities — real-time routes, weather, and smart timing
+    </p>
+    """, unsafe_allow_html=True)
     st.divider()
 
     # ── Proactive alerts — checked inline on each page load ──────────────────
@@ -910,6 +1011,13 @@ def render_app():
                 key="dest_searchbox",
                 clear_on_submit=False,
             )
+
+        st.markdown("""<style>
+        [data-testid="stCustomComponentV1"] > iframe {
+          background: transparent !important;
+          color-scheme: dark !important;
+        }
+        </style>""", unsafe_allow_html=True)
 
         # ── Auto-detect city on input change (without submit) ──
         if origin and destination:
@@ -1051,13 +1159,6 @@ def render_app():
 </div>""",
                 unsafe_allow_html=True,
             )
-
-            # City detection banner
-            detected_city     = st.session_state.get("detected_city", "unknown")
-            city_override_val = st.session_state.get("city_override", "Auto-detect")
-            if detected_city and detected_city != "unknown":
-                source_note = " (manually selected)" if city_override_val != "Auto-detect" else " (auto-detected)"
-                st.info(f"📍 **City: {detected_city}**{source_note} · Routing strategy selected accordingly. Wrong city? Change it in the sidebar.", icon=None)
 
             # Row 1: Weather | Leave-by | Urgency
             r1c1, r1c2, r1c3 = st.columns([2, 2, 1])
@@ -1313,6 +1414,156 @@ def render_app():
         if not require_auth("My Commutes"):
             pass
         else:
+            import altair as alt
+            import pandas as pd
+
+            def _render_spend_chart(spend_by_mode: dict):
+                if not spend_by_mode:
+                    return
+                df = pd.DataFrame([
+                    {"Mode": k.replace("_", " ").title(), "Spend (₹)": v}
+                    for k, v in spend_by_mode.items()
+                ])
+                color_map = {
+                    "Cab":          "#F59E0B",
+                    "Metro Hybrid": "#00C2FF",
+                    "Transit":      "#3B82F6",
+                    "Metro":        "#00C2FF",
+                }
+                chart = (
+                    alt.Chart(df)
+                    .mark_bar(cornerRadiusTopLeft=6, cornerRadiusTopRight=6)
+                    .encode(
+                        x=alt.X("Mode:N", axis=alt.Axis(
+                            labelColor="rgba(232,244,253,0.5)",
+                            tickColor="rgba(0,194,255,0.1)",
+                            domainColor="rgba(0,194,255,0.1)",
+                            labelFont="Plus Jakarta Sans",
+                            labelFontSize=12, title=None,
+                        )),
+                        y=alt.Y("Spend (₹):Q", axis=alt.Axis(
+                            labelColor="rgba(232,244,253,0.5)",
+                            gridColor="rgba(0,194,255,0.08)",
+                            tickColor="rgba(0,194,255,0.1)",
+                            domainColor="rgba(0,194,255,0.1)",
+                            labelFont="Plus Jakarta Sans",
+                            labelFontSize=11, title=None,
+                        )),
+                        color=alt.Color("Mode:N",
+                            scale=alt.Scale(
+                                domain=list(color_map.keys()),
+                                range=list(color_map.values()),
+                            ),
+                            legend=alt.Legend(
+                                labelColor="rgba(232,244,253,0.6)",
+                                titleColor="rgba(232,244,253,0.4)",
+                                labelFont="Plus Jakarta Sans",
+                            )
+                        ),
+                        tooltip=[
+                            alt.Tooltip("Mode:N", title="Mode"),
+                            alt.Tooltip("Spend (₹):Q", title="Total Spend", format=",.0f"),
+                        ]
+                    )
+                    .properties(
+                        height=220,
+                        background="transparent",
+                        padding={"top": 10, "bottom": 10, "left": 10, "right": 10},
+                    )
+                    .configure_view(strokeOpacity=0)
+                )
+                st.altair_chart(chart, use_container_width=True)
+
+            def _render_spend_card(label: str, amount: int, icon: str, accent: str):
+                st.markdown(f"""
+                <div style="background:#0D1F4A;border:1px solid {accent}33;border-left:3px solid {accent};
+                  border-radius:14px;padding:20px 24px;margin-bottom:8px;">
+                  <div style="font-size:0.68rem;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;
+                    color:{accent};margin-bottom:8px;">{icon} {label}</div>
+                  <div style="font-size:2rem;font-weight:800;color:#E8F4FD;letter-spacing:-0.02em;line-height:1;">
+                    ₹{amount:,}</div>
+                </div>
+                """, unsafe_allow_html=True)
+
+            def _render_savings_table(opps: list):
+                if not opps:
+                    st.markdown("""
+                    <div style="background:rgba(0,194,255,0.04);border:1px solid rgba(0,194,255,0.1);
+                      border-radius:12px;padding:24px;text-align:center;
+                      color:rgba(232,244,253,0.35);font-size:0.88rem;">
+                      No savings opportunities found this month — your routing looks optimal.
+                    </div>
+                    """, unsafe_allow_html=True)
+                    return
+
+                rows_html = ""
+                for i, opp in enumerate(opps[:10]):
+                    row_bg = "rgba(0,194,255,0.03)" if i % 2 == 0 else "transparent"
+                    saving = opp.get("saving", 0)
+                    saving_color = "#10B981" if saving > 200 else "#F59E0B"
+                    rows_html += f"""
+                    <tr style="background:{row_bg}; transition:background 0.15s ease;">
+                      <td style="padding:12px 16px; color:rgba(232,244,253,0.55); font-size:0.82rem;
+                                 border-bottom:1px solid rgba(0,194,255,0.06); white-space:nowrap;">
+                        {opp.get('date', '—')}
+                      </td>
+                      <td style="padding:12px 16px; color:#E8F4FD; font-size:0.88rem;
+                                 border-bottom:1px solid rgba(0,194,255,0.06);">
+                        {opp.get('route', '—')}
+                      </td>
+                      <td style="padding:12px 16px; color:rgba(232,244,253,0.65); font-size:0.88rem;
+                                 text-align:right; border-bottom:1px solid rgba(0,194,255,0.06);">
+                        ₹{opp.get('cab_cost', 0):,}
+                      </td>
+                      <td style="padding:12px 16px; color:rgba(0,194,255,0.8); font-size:0.88rem;
+                                 text-align:right; border-bottom:1px solid rgba(0,194,255,0.06);">
+                        ₹{opp.get('metro_cost', 0):,}
+                      </td>
+                      <td style="padding:12px 16px; color:{saving_color}; font-weight:700; font-size:0.92rem;
+                                 text-align:right; border-bottom:1px solid rgba(0,194,255,0.06);">
+                        ₹{saving:,}
+                      </td>
+                    </tr>"""
+
+                st.markdown(f"""
+                <div style="border:1px solid rgba(0,194,255,0.12);border-radius:14px;
+                  overflow:hidden;margin-top:8px;">
+                  <table style="width:100%;border-collapse:collapse;font-family:'Plus Jakarta Sans',sans-serif;">
+                    <thead>
+                      <tr style="background:rgba(0,194,255,0.07);">
+                        <th style="padding:11px 16px;text-align:left;font-size:0.7rem;font-weight:700;
+                                   letter-spacing:0.1em;text-transform:uppercase;color:rgba(0,194,255,0.6);
+                                   border-bottom:1px solid rgba(0,194,255,0.15);">Date</th>
+                        <th style="padding:11px 16px;text-align:left;font-size:0.7rem;font-weight:700;
+                                   letter-spacing:0.1em;text-transform:uppercase;color:rgba(0,194,255,0.6);
+                                   border-bottom:1px solid rgba(0,194,255,0.15);">Route</th>
+                        <th style="padding:11px 16px;text-align:right;font-size:0.7rem;font-weight:700;
+                                   letter-spacing:0.1em;text-transform:uppercase;color:rgba(245,158,11,0.7);
+                                   border-bottom:1px solid rgba(0,194,255,0.15);">Cab Cost (₹)</th>
+                        <th style="padding:11px 16px;text-align:right;font-size:0.7rem;font-weight:700;
+                                   letter-spacing:0.1em;text-transform:uppercase;color:rgba(0,194,255,0.6);
+                                   border-bottom:1px solid rgba(0,194,255,0.15);">Metro Cost (₹)</th>
+                        <th style="padding:11px 16px;text-align:right;font-size:0.7rem;font-weight:700;
+                                   letter-spacing:0.1em;text-transform:uppercase;color:rgba(16,185,129,0.8);
+                                   border-bottom:1px solid rgba(0,194,255,0.15);">Saving (₹)</th>
+                      </tr>
+                    </thead>
+                    <tbody>{rows_html}</tbody>
+                  </table>
+                </div>
+                """, unsafe_allow_html=True)
+
+            def _render_insight_card(insight: str):
+                st.markdown(f"""
+                <div style="background:rgba(0,194,255,0.07);border:1px solid rgba(0,194,255,0.2);
+                  border-left:3px solid #00C2FF;border-radius:12px;padding:16px 20px;
+                  margin-bottom:20px;display:flex;gap:14px;align-items:flex-start;">
+                  <span style="font-size:1.2rem;flex-shrink:0;">🤖</span>
+                  <span style="color:#E8F4FD;font-size:0.92rem;line-height:1.6;">{insight}</span>
+                </div>
+                """, unsafe_allow_html=True)
+
+            # ── Data ──────────────────────────────────────────────────────────
             _mc_user  = get_current_user()
             _mc_trips = get_client().get_trip_history(_mc_user.id, limit=50)
 
@@ -1333,48 +1584,53 @@ def render_app():
                 _mc_saving      = sum(o["saving"] for o in _mc_opps[:3])
                 _mc_month_label = datetime.now().strftime("%B %Y")
 
+                # ── Insight card ──────────────────────────────────────────────
                 if _mc_saving > 0 and _mc_opps:
-                    st.success(
-                        f"**{_mc_month_label}:** You've spent ₹{_mc_total} on commutes. "
+                    _render_insight_card(
+                        f"<strong>{_mc_month_label}:</strong> You've spent ₹{_mc_total} on commutes. "
                         f"Switching to metro on your {min(3, len(_mc_opps))} most frequent routes "
-                        f"would save **₹{_mc_saving}/month**.",
-                        icon="💡",
+                        f"would save <strong>₹{_mc_saving}/month</strong>."
                     )
                 elif _mc_total > 0:
-                    st.info(
-                        f"**{_mc_month_label}:** You've spent ₹{_mc_total} on commutes "
-                        f"across {_mc_spend.get('trip_count', 0)} trips.",
-                        icon="💡",
+                    _render_insight_card(
+                        f"<strong>{_mc_month_label}:</strong> You've spent ₹{_mc_total} on commutes "
+                        f"across {_mc_spend.get('trip_count', 0)} trips."
                     )
                 else:
-                    st.info("No spend recorded for this month yet.", icon="💡")
+                    _render_insight_card("No spend recorded for this month yet.")
 
+                # ── Monthly Spend ─────────────────────────────────────────────
                 _mc_by_mode = _mc_spend.get("by_mode", {})
                 if _mc_by_mode:
-                    st.markdown(f"### Monthly Spend — {_mc_month_label}")
-                    import pandas as pd
-                    _mc_chart = pd.DataFrame({
-                        "Mode":      list(_mc_by_mode.keys()),
-                        "Spend (₹)": list(_mc_by_mode.values()),
-                    }).set_index("Mode")
-                    st.bar_chart(_mc_chart, use_container_width=True, height=260)
-                    _mc_cols = st.columns(len(_mc_by_mode))
-                    for _col, (_mode, _amt) in zip(_mc_cols, _mc_by_mode.items()):
-                        _col.metric(f"{_mode.title()} spend", f"₹{_amt}")
+                    st.markdown(f"""
+                    <div style="display:flex;align-items:center;gap:12px;margin:28px 0 6px 0;">
+                      <span style="font-size:1.4rem;">📊</span>
+                      <span style="font-size:1.3rem;font-weight:800;color:#E8F4FD;letter-spacing:-0.02em;">
+                        Monthly Spend — {_mc_month_label}</span>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    _render_spend_chart(_mc_by_mode)
+                    mc1, mc2 = st.columns(2)
+                    with mc1:
+                        _render_spend_card("Cab Spend", _mc_by_mode.get("cab", 0), "🚕", "#F59E0B")
+                    with mc2:
+                        _transit = _mc_by_mode.get("metro_hybrid", 0) or _mc_by_mode.get("transit", 0)
+                        _render_spend_card("Transit Spend", _transit, "🚇", "#00C2FF")
 
                 st.divider()
 
-                if _mc_opps:
-                    st.markdown("### 💰 Savings Opportunities")
-                    st.caption("Trips where you took a cab but metro was available or cheaper.")
-                    import pandas as pd
-                    _opp_df = pd.DataFrame(_mc_opps[:10])[
-                        ["date", "route", "cab_cost", "metro_cost", "saving"]
-                    ]
-                    _opp_df.columns = ["Date", "Route", "Cab Cost (₹)", "Metro Cost (₹)", "Saving (₹)"]
-                    st.dataframe(_opp_df, use_container_width=True, hide_index=True)
-                else:
-                    st.success("No savings opportunities found — you're already commuting efficiently!", icon="✅")
+                # ── Savings Opportunities ─────────────────────────────────────
+                st.markdown("""
+                <div style="display:flex;align-items:center;gap:12px;margin:28px 0 6px 0;">
+                  <span style="font-size:1.4rem;">💰</span>
+                  <span style="font-size:1.3rem;font-weight:800;color:#E8F4FD;letter-spacing:-0.02em;">
+                    Savings Opportunities</span>
+                </div>
+                <p style="color:rgba(232,244,253,0.45);font-size:0.88rem;margin-top:0;margin-bottom:20px;">
+                  Trips where you took a cab but metro was available or cheaper.
+                </p>
+                """, unsafe_allow_html=True)
+                _render_savings_table(_mc_opps)
 
 
     # ══════════════════════════════════════════════════════════════════════════

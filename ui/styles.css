@@ -1,6 +1,6 @@
 /* ============================================================
    Sherpa — Global Stylesheet
-   Theme: Navy Amber · High-Tech Futuristic
+   Theme: Futuristic Midnight Transit
    Font: Plus Jakarta Sans (Google Fonts)
    ============================================================ */
 
@@ -14,38 +14,37 @@
 
 /* ── CSS variables ───────────────────────────────────────────── */
 :root {
-  --bg:           #060f1e;
-  --bg-card:      #0a1a2e;
-  --bg-sidebar:   #091528;
-  --bg-subtle:    #0d2040;
+  --bg:             #060E22;
+  --bg-card:        #0D1F4A;
+  --bg-sidebar:     #0B1B3E;
+  --bg-subtle:      #0F2355;
 
-  --text-primary:   #e2f0ff;
-  --text-secondary: #7ab0d4;
-  --text-muted:     #3d6b8a;
+  --text-primary:   #E8F4FD;
+  --text-secondary: rgba(232,244,253,0.6);
+  --text-muted:     rgba(232,244,253,0.35);
 
-  --accent:         #f59e0b;   /* amber */
-  --accent-hover:   #fbbf24;
-  --accent-soft:    rgba(245, 158, 11, 0.12);
+  --accent:         #00C2FF;
+  --accent-hover:   #33CEFF;
+  --accent-soft:    rgba(0,194,255,0.1);
 
-  --green:          #10b981;
-  --green-soft:     rgba(16, 185, 129, 0.12);
-  --red:            #ef4444;
-  --red-soft:       rgba(239, 68, 68, 0.12);
-  --amber:          #f59e0b;
-  --amber-soft:     rgba(245, 158, 11, 0.12);
+  --green:          #10B981;
+  --green-soft:     rgba(16,185,129,0.12);
+  --red:            #EF4444;
+  --red-soft:       rgba(239,68,68,0.12);
+  --amber:          #F59E0B;
+  --amber-soft:     rgba(245,158,11,0.12);
 
-  --border:         rgba(245, 158, 11, 0.22);
-  --border-focus:   #f59e0b;
-  --shadow-sm:      0 1px 6px rgba(0,0,0,0.5), 0 0 10px rgba(245,158,11,0.06);
-  --shadow-md:      0 4px 20px rgba(0,0,0,0.6), 0 0 24px rgba(245,158,11,0.12);
-  --shadow-lg:      0 8px 40px rgba(0,0,0,0.7), 0 0 48px rgba(245,158,11,0.2);
+  --border:         rgba(0,194,255,0.12);
+  --border-focus:   #00C2FF;
+  --shadow-sm:      0 1px 4px rgba(0,0,0,0.4);
+  --shadow-md:      0 4px 16px rgba(0,0,0,0.5);
+  --shadow-lg:      0 8px 32px rgba(0,194,255,0.08);
 
-  --radius-sm:  8px;
-  --radius-md:  12px;
-  --radius-lg:  18px;
-  --radius-pill:40px;
-
-  --transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  --radius-sm:   8px;
+  --radius-md:   12px;
+  --radius-lg:   18px;
+  --radius-pill: 40px;
+  --transition:  0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 
@@ -87,8 +86,8 @@
 }
 
 @keyframes amberGlow {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
-  50%       { box-shadow: 0 0 22px 6px rgba(245, 158, 11, 0.18); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(0, 194, 255, 0); }
+  50%       { box-shadow: 0 0 24px 6px rgba(0, 194, 255, 0.2); }
 }
 
 @keyframes scanLine {
@@ -122,9 +121,9 @@ html, body, [class*="css"] {
 
 /* Scrollbar */
 ::-webkit-scrollbar       { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: var(--bg-subtle); }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 10px; }
-::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: rgba(0,194,255,0.2); border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0,194,255,0.4); }
 
 
 /* ── Typography ──────────────────────────────────────────────── */
@@ -152,7 +151,7 @@ p, li, span, label, div {
 }
 
 em, i {
-  color: var(--text-muted) !important;
+  color: var(--text-secondary) !important;
 }
 
 
@@ -168,7 +167,6 @@ em, i {
 [data-testid="stSidebar"] .block-container {
   padding-top: 1.5rem !important;
 }
-
 
 [data-testid="stSidebar"] h2,
 [data-testid="stSidebar"] h3,
@@ -206,7 +204,7 @@ em, i {
   opacity: 0.9;
 }
 
-/* Preferences expander heading */
+/* Sidebar expander headings */
 [data-testid="stSidebar"] .streamlit-expanderHeader,
 [data-testid="stSidebar"] .streamlit-expanderHeader p,
 [data-testid="stSidebar"] .streamlit-expanderHeader span,
@@ -219,7 +217,7 @@ em, i {
   letter-spacing: 0.03em !important;
 }
 
-/* Preferences expander arrow icon */
+/* Sidebar expander arrow icon */
 [data-testid="stSidebar"] .streamlit-expanderHeader svg,
 [data-testid="stSidebar"] details summary svg {
   fill: #FFFFFF !important;
@@ -234,14 +232,14 @@ em, i {
   font-weight: 600 !important;
 }
 
-/* Slider thumb value ("15 min") and tick bar min/max labels */
+/* Slider thumb value and tick bar labels */
 [data-testid="stSidebar"] [data-testid="stThumbValue"],
 [data-testid="stSidebar"] [data-testid="stTickBar"] span,
 [data-testid="stSidebar"] .stSlider span {
   color: #FFFFFF !important;
 }
 
-/* Space between sliders — extra after safety buffer (first slider) */
+/* Space between sliders */
 [data-testid="stSidebar"] .stSlider {
   margin-bottom: 2.2rem !important;
 }
@@ -262,7 +260,7 @@ em, i {
 }
 
 [data-testid="stSidebar"] hr {
-  border-color: var(--border) !important;
+  border-color: rgba(255,255,255,0.15) !important;
 }
 
 .sidebar-status-card {
@@ -289,6 +287,13 @@ em, i {
   font-family: 'Plus Jakarta Sans', sans-serif;
 }
 
+/* Saved commute buttons — prevent overflow */
+[data-testid="stSidebar"] .stButton > button {
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
 /* Saved commutes ✕ delete button */
 [data-testid="stSidebar"] button[kind="tertiary"] {
   color: rgba(255, 255, 255, 0.6) !important;
@@ -312,14 +317,13 @@ em, i {
 }
 
 
-
 /* ── Welcome bar ─────────────────────────────────────────────── */
 .welcome-chip {
   display: flex;
   align-items: center;
   gap: 8px;
-  background: rgba(245, 158, 11, 0.07);
-  border: 1px solid rgba(245, 158, 11, 0.28);
+  background: rgba(0, 194, 255, 0.07);
+  border: 1px solid rgba(0, 194, 255, 0.25);
   border-radius: 40px;
   padding: 7px 14px 7px 10px;
   width: fit-content;
@@ -355,9 +359,9 @@ em, i {
   font-weight: 600 !important;
   font-size: 0.875rem !important;
   border-radius: var(--radius-sm) !important;
-  border: 1px solid var(--border) !important;
-  background: var(--bg-card) !important;
-  color: var(--text-primary) !important;
+  border: 1px solid rgba(0,194,255,0.2) !important;
+  background: rgba(0,194,255,0.06) !important;
+  color: var(--text-secondary) !important;
   transition: all var(--transition) !important;
   box-shadow: var(--shadow-sm) !important;
   white-space: nowrap !important;
@@ -366,9 +370,9 @@ em, i {
 }
 
 .stButton > button:hover {
-  background: var(--accent-soft) !important;
-  border-color: var(--accent) !important;
-  color: var(--accent) !important;
+  background: rgba(0,194,255,0.1) !important;
+  border-color: rgba(0,194,255,0.45) !important;
+  color: var(--text-primary) !important;
   transform: translateY(-1px) !important;
   box-shadow: var(--shadow-md) !important;
 }
@@ -381,18 +385,20 @@ em, i {
 /* Primary button (form submit) */
 .stButton > button[kind="primary"],
 button[data-testid="baseButton-primary"] {
-  background: var(--accent) !important;
-  border-color: var(--accent) !important;
-  color: #FFFFFF !important;
+  background: #00C2FF !important;
+  border: none !important;
+  color: #060E22 !important;
+  font-weight: 700 !important;
   font-size: 0.95rem !important;
-  letter-spacing: 0.01em !important;
+  letter-spacing: 0.02em !important;
+  box-shadow: 0 0 20px rgba(0,194,255,0.3) !important;
 }
 
 .stButton > button[kind="primary"]:hover,
 button[data-testid="baseButton-primary"]:hover {
-  background: var(--accent-hover) !important;
-  border-color: var(--accent-hover) !important;
-  color: #FFFFFF !important;
+  background: #33CEFF !important;
+  color: #060E22 !important;
+  box-shadow: 0 0 28px rgba(0,194,255,0.5) !important;
 }
 
 
@@ -403,7 +409,7 @@ button[data-testid="baseButton-primary"]:hover {
 .stDateInput > div > div > input,
 .stTimeInput > div > div > input {
   font-family: 'Plus Jakarta Sans', sans-serif !important;
-  background: var(--bg-card) !important;
+  background: rgba(255,255,255,0.04) !important;
   border: 1px solid var(--border) !important;
   border-radius: var(--radius-sm) !important;
   color: var(--text-primary) !important;
@@ -413,23 +419,29 @@ button[data-testid="baseButton-primary"]:hover {
 .stTextInput > div > div > input:focus,
 .stNumberInput > div > div > input:focus {
   border-color: var(--border-focus) !important;
-  box-shadow: 0 0 0 3px rgba(181,84,26,0.12) !important;
+  box-shadow: 0 0 0 3px rgba(0,194,255,0.15) !important;
   outline: none !important;
+}
+
+.stTextInput > div > div > input::placeholder,
+.stNumberInput > div > div > input::placeholder {
+  color: rgba(232,244,253,0.3) !important;
 }
 
 .stTextInput label, .stSelectbox label,
 .stDateInput label, .stTimeInput label {
   font-weight: 600 !important;
   font-size: 0.8rem !important;
-  color: var(--text-secondary) !important;
-  letter-spacing: 0.04em !important;
+  color: var(--text-muted) !important;
+  letter-spacing: 0.06em !important;
   text-transform: uppercase !important;
 }
 
 
 /* ── Tabs ────────────────────────────────────────────────────── */
 .stTabs [data-baseweb="tab-list"] {
-  background: var(--bg-subtle) !important;
+  background: rgba(0,0,0,0.3) !important;
+  border: 1px solid rgba(0,194,255,0.08) !important;
   border-radius: var(--radius-md) !important;
   padding: 4px !important;
   gap: 2px !important;
@@ -447,9 +459,10 @@ button[data-testid="baseButton-primary"]:hover {
 }
 
 .stTabs [aria-selected="true"] {
-  background: var(--bg-card) !important;
-  color: var(--accent) !important;
-  box-shadow: var(--shadow-sm) !important;
+  background: rgba(0,194,255,0.12) !important;
+  color: #00C2FF !important;
+  border-bottom: 2px solid #00C2FF !important;
+  box-shadow: none !important;
 }
 
 .stTabs [data-baseweb="tab-panel"] {
@@ -462,7 +475,7 @@ button[data-testid="baseButton-primary"]:hover {
 [data-testid="stMetricValue"] {
   font-size: 1.3rem !important;
   font-weight: 700 !important;
-  color: var(--accent) !important;
+  color: #00C2FF !important;
 }
 
 [data-testid="stMetricLabel"] {
@@ -476,7 +489,7 @@ button[data-testid="baseButton-primary"]:hover {
 [data-testid="stMetric"] {
   background: var(--bg-card) !important;
   border: 1px solid var(--border) !important;
-  border-top: 2px solid var(--accent) !important;
+  border-top: 2px solid #00C2FF !important;
   border-radius: var(--radius-md) !important;
   padding: 14px 16px !important;
   box-shadow: var(--shadow-sm) !important;
@@ -484,7 +497,7 @@ button[data-testid="baseButton-primary"]:hover {
 }
 
 [data-testid="stMetric"]:hover {
-  box-shadow: var(--shadow-md) !important;
+  box-shadow: 0 0 16px rgba(0,194,255,0.12) !important;
   transform: translateY(-2px) !important;
 }
 
@@ -507,33 +520,37 @@ div[data-testid="stAlert"] > div {
 
 /* Info */
 .stAlert[data-type="info"], div[data-baseweb="notification"][kind="info"] {
-  background: var(--amber-soft) !important;
-  color: var(--amber) !important;
+  background: rgba(0,194,255,0.08) !important;
+  border-left: 3px solid #00C2FF !important;
+  color: #00C2FF !important;
 }
 
 /* Success */
 .stAlert[data-type="success"] {
   background: var(--green-soft) !important;
+  border-left: 3px solid var(--green) !important;
   color: var(--green) !important;
 }
 
 /* Warning */
 .stAlert[data-type="warning"] {
   background: var(--amber-soft) !important;
+  border-left: 3px solid var(--amber) !important;
   color: var(--amber) !important;
 }
 
 /* Error */
 .stAlert[data-type="error"] {
   background: var(--red-soft) !important;
+  border-left: 3px solid var(--red) !important;
   color: var(--red) !important;
 }
 
 
 /* ── Divider ─────────────────────────────────────────────────── */
 hr {
-  border-color: var(--border) !important;
-  opacity: 0.7 !important;
+  border-color: rgba(0,194,255,0.1) !important;
+  opacity: 1 !important;
 }
 
 
@@ -543,15 +560,16 @@ hr {
   font-weight: 600 !important;
   font-size: 0.9rem !important;
   color: var(--text-secondary) !important;
-  background: var(--bg-subtle) !important;
-  border-radius: var(--radius-sm) !important;
+  background: rgba(0,194,255,0.04) !important;
+  border: 1px solid var(--border) !important;
   border-left: 2px solid var(--accent) !important;
+  border-radius: var(--radius-sm) !important;
   transition: background var(--transition), color var(--transition) !important;
 }
 
 .streamlit-expanderHeader:hover {
-  background: var(--accent-soft) !important;
-  color: var(--accent) !important;
+  background: rgba(0,194,255,0.08) !important;
+  color: #00C2FF !important;
 }
 
 .streamlit-expanderContent {
@@ -567,6 +585,7 @@ hr {
 .stSlider [data-baseweb="slider"] [role="slider"] {
   background: var(--accent) !important;
   border-color: var(--accent) !important;
+  box-shadow: 0 0 8px rgba(0,194,255,0.4) !important;
 }
 
 .stSlider [data-baseweb="slider"] [data-testid="stThumbValue"] {
@@ -605,16 +624,16 @@ hr {
   text-transform: uppercase;
   animation: fadeIn 0.4s ease both;
 }
-.badge-low      { background: var(--green-soft); color: var(--green); }
-.badge-medium   { background: var(--amber-soft); color: var(--amber); }
-.badge-high     { background: #F5EAD8;           color: #8C4A10; }
-.badge-critical { background: var(--red-soft);   color: var(--red); }
+.badge-low      { background: rgba(16,185,129,0.15);  color: #10B981; }
+.badge-medium   { background: rgba(245,158,11,0.15);  color: #F59E0B; }
+.badge-high     { background: rgba(245,158,11,0.2);   color: #D97706; }
+.badge-critical { background: rgba(239,68,68,0.15);   color: #EF4444; }
 
 
 /* ── Route cards ─────────────────────────────────────────────── */
 .route-card {
   border: 1px solid var(--border);
-  border-left: 3px solid rgba(245, 158, 11, 0.4);
+  border-left: 3px solid rgba(0,194,255,0.3);
   border-radius: var(--radius-lg);
   padding: 18px 20px;
   margin-bottom: 14px;
@@ -632,20 +651,19 @@ hr {
 }
 
 .route-card-best {
-  border: 1px solid var(--accent);
-  border-left: 3px solid var(--accent);
+  background: rgba(0,194,255,0.06);
+  border: 2px solid #00C2FF;
   border-radius: var(--radius-lg);
   padding: 18px 20px;
   margin-bottom: 14px;
-  background: var(--bg-card);
   color: var(--text-primary) !important;
-  box-shadow: var(--shadow-md);
+  box-shadow: 0 0 24px rgba(0,194,255,0.15);
   animation: slideUp 0.3s ease both, amberGlow 3s ease-in-out infinite;
   transition: box-shadow var(--transition), transform var(--transition);
 }
 
 .route-card-best:hover {
-  box-shadow: var(--shadow-lg);
+  box-shadow: 0 0 36px rgba(0,194,255,0.25);
   transform: translateY(-3px);
 }
 
@@ -660,8 +678,8 @@ hr {
 
 /* ── Chat bubbles ────────────────────────────────────────────── */
 .chat-user {
-  background: rgba(245, 158, 11, 0.1);
-  border: 1px solid rgba(245, 158, 11, 0.3);
+  background: rgba(0,194,255,0.1);
+  border: 1px solid rgba(0,194,255,0.2);
   border-radius: 14px 14px 2px 14px;
   padding: 10px 16px;
   margin: 6px 0;
@@ -672,7 +690,7 @@ hr {
 }
 
 .chat-agent {
-  background: var(--bg-subtle);
+  background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: 14px 14px 14px 2px;
   padding: 10px 16px;
@@ -718,12 +736,12 @@ hr {
 }
 
 .rp-dot-o {
-  background: var(--green);
+  background: #00C2FF;
   animation: pulse-dot 2.5s ease-in-out infinite;
 }
 
 .rp-dot-d {
-  background: var(--red);
+  background: #F59E0B;
 }
 
 .rp-text {
@@ -754,7 +772,7 @@ hr {
 
 /* ── Selectbox ───────────────────────────────────────────────── */
 .stSelectbox [data-baseweb="select"] > div {
-  background: var(--bg-card) !important;
+  background: rgba(255,255,255,0.04) !important;
   border-color: var(--border) !important;
   border-radius: var(--radius-sm) !important;
   font-family: 'Plus Jakarta Sans', sans-serif !important;
@@ -764,7 +782,7 @@ hr {
 
 .stSelectbox [data-baseweb="select"] > div:focus-within {
   border-color: var(--border-focus) !important;
-  box-shadow: 0 0 0 3px rgba(181,84,26,0.12) !important;
+  box-shadow: 0 0 0 3px rgba(0,194,255,0.15) !important;
 }
 
 [data-baseweb="popover"] {
@@ -785,7 +803,7 @@ hr {
 }
 
 [data-baseweb="menu"] li:hover {
-  background: var(--accent-soft) !important;
+  background: rgba(0,194,255,0.08) !important;
 }
 
 /* ══════════════════════════════════════════════════════════════════════════════
@@ -866,6 +884,48 @@ hr {
   flex: 1;
   height: 1px;
   background: rgba(255,255,255,0.12);
+}
+
+/* ── Dataframe / table — dark theme ─────────────────────────── */
+[data-testid="stDataFrame"] {
+  border: 1px solid rgba(0,194,255,0.12) !important;
+  border-radius: var(--radius-md) !important;
+  overflow: hidden !important;
+}
+
+[data-testid="stDataFrame"] table {
+  background: #0D1F4A !important;
+}
+
+[data-testid="stDataFrame"] thead tr th {
+  background: rgba(0,194,255,0.08) !important;
+  color: rgba(232,244,253,0.5) !important;
+  font-size: 0.75rem !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.06em !important;
+  text-transform: uppercase !important;
+  border-bottom: 1px solid rgba(0,194,255,0.15) !important;
+  padding: 12px 16px !important;
+}
+
+[data-testid="stDataFrame"] tbody tr td {
+  background: transparent !important;
+  color: #E8F4FD !important;
+  font-size: 0.88rem !important;
+  border-bottom: 1px solid rgba(0,194,255,0.06) !important;
+  padding: 11px 16px !important;
+}
+
+[data-testid="stDataFrame"] tbody tr:hover td {
+  background: rgba(0,194,255,0.05) !important;
+}
+
+/* Altair chart container */
+[data-testid="stVegaLiteChart"] {
+  background: transparent !important;
+}
+[data-testid="stVegaLiteChart"] canvas {
+  border-radius: var(--radius-md) !important;
 }
 
 

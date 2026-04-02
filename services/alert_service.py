@@ -54,56 +54,81 @@ def _is_departure_window(usual_hour: float | None) -> bool:
 
 
 # ── Alert generation ──────────────────────────────────────────────────────────
-
 async def generate_alerts(patterns: dict) -> list[dict]:
     """
     Returns a list of alert dicts for the user's most frequent route.
     Each alert: {type, severity, message, suggestion}
-    severity: "warning" (red) | "info" (blue)
     """
     alerts = []
+
     route = patterns.get("most_frequent_route")
-    if not route:
+    usual_hour = patterns.get("usual_departure_hour")
+
+    if not route or usual_hour is None:
         return alerts
 
-    # TEMP: always generate a test alert so SMS can be verified end-to-end
+    # ── Base departure alert (ALWAYS present) ──
+    from datetime import datetime
+
+    now = datetime.now()
+    now_hour = now.hour + now.minute / 60
+
+    # Handle midnight rollover
+    diff = (usual_hour - now_hour) % 24
+    mins_left = int(diff * 60)
+
+    departure_hour = int(usual_hour)
+    departure_min = int((usual_hour % 1) * 60)
+
     alerts.append({
-        "type": "test",
-        "severity": "info",
-        "message": "Proactive alert system is working — your usual commute is coming up.",
-        "suggestion": "This is a test alert. Remove after SMS is verified.",
+        "type": "departure",
+        "severity": "warning" if mins_left < 30 else "info",
+        "message": f"Your usual commute starts in ~{mins_left} minutes.",
+        "suggestion": (
+            f"Route: {route['origin']} → {route['destination']}. "
+            f"Leave around {departure_hour:02d}:{departure_min:02d}."
+        ),
     })
 
-    # --- Weather check ---
+    # ── Weather check ──
     try:
         weather = await _fetch_weather_for_alert(route["origin"])
         rain_prob = weather.get("rain_probability", 0)
-        if rain_prob > 0.5:
+
+        # Lower threshold → more useful alerts
+        if rain_prob > 0.3:
             alerts.append({
                 "type": "rain",
                 "severity": "warning",
-                "message": f"Rain likely ({int(rain_prob * 100)}% chance) around your usual departure time.",
-                "suggestion": "Consider leaving 15 min early or switching to metro to avoid cab surge pricing.",
+                "message": f"Rain expected (~{int(rain_prob * 100)}%) during your commute.",
+                "suggestion": "Leave 10–15 min early or consider metro to avoid delays.",
             })
-    except Exception:
-        pass  # Never block on weather failure
 
-    # --- Crowding check (optional — only if Session 5 has been built) ---
+    except Exception:
+        pass  # never block alerts on weather failure
+
+    # ── Crowding check (optional) ──
     try:
         from services.crowding_service import estimate_crowding
+
         usual_line = patterns.get("usual_metro_line")
-        usual_hour = patterns.get("usual_departure_hour")
-        if usual_line and usual_hour:
+
+        if usual_line:
             crowding = estimate_crowding(usual_line, usual_hour)
-            if crowding.get("occupancy", 0) > 0.80:
+
+            if crowding.get("occupancy", 0) > 0.75:  # slightly relaxed
                 alerts.append({
                     "type": "crowding",
                     "severity": "info",
-                    "message": f"{usual_line} will be {crowding['label']} at your usual departure time.",
-                    "suggestion": crowding.get("coach_tip", "Consider travelling 15 min off-peak."),
+                    "message": f"{usual_line} may be crowded at your departure time.",
+                    "suggestion": crowding.get(
+                        "coach_tip",
+                        "Try boarding from the front/rear coaches or leave slightly earlier.",
+                    ),
                 })
+
     except ImportError:
-        pass  # crowding_service not built yet — skip silently
+        pass  # crowding not implemented yet
 
     return alerts
 
