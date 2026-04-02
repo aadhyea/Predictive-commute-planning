@@ -56,9 +56,11 @@ class CommuteRecommendation:
 
     urgency: str = "LOW"
     risk_score: float = 0.0
-    leave_by: Optional[str] = None
+    leave_by: Optional[str] = None       # "HH:MM" display string
+    leave_by_iso: Optional[str] = None   # full ISO datetime — use for comfort advisory
 
     weather_summary: Optional[str] = None
+    weather_condition: Optional[str] = None  # raw OWM condition e.g. "Rain", "Clear", "Clouds"
     disruptions: List[str] = field(default_factory=list)
 
     uber_link: Optional[str] = None
@@ -76,7 +78,9 @@ class CommuteRecommendation:
             "urgency":            self.urgency,
             "risk_score":         self.risk_score,
             "leave_by":           self.leave_by,
+            "leave_by_iso":       self.leave_by_iso,
             "weather_summary":    self.weather_summary,
+            "weather_condition":  self.weather_condition,
             "disruptions":        self.disruptions,
             "uber_link":          self.uber_link,
             "ola_link":           self.ola_link,
@@ -465,10 +469,12 @@ class CommuteAgent:
         failed_tools: Optional[List[str]] = None,
     ) -> "CommuteRecommendation":
         routes:      List[Dict] = []
-        leave_by:    Optional[str] = None
+        leave_by:     Optional[str] = None
+        leave_by_iso: Optional[str] = None
         urgency:     str = "LOW"
         risk_score:  float = 0.0
-        weather_summary: Optional[str] = None
+        weather_summary:   Optional[str] = None
+        weather_condition: Optional[str] = None
 
         for tr in tool_results:
             data = tr.get("result", {})
@@ -484,14 +490,16 @@ class CommuteAgent:
 
             # Leave time / urgency
             if "leave_by" in data and "urgency" in data:
-                leave_by   = data["leave_by"]
-                urgency    = data["urgency"]
-                risk_score = data.get("risk_score", risk_score)
+                leave_by     = data["leave_by"]
+                leave_by_iso = data.get("leave_by_iso")
+                urgency      = data["urgency"]
+                risk_score   = data.get("risk_score", risk_score)
 
             # Weather
             if "commute_impact" in data:
                 ci = data["commute_impact"]
-                weather_summary = ci.get("recommendation")
+                weather_summary   = ci.get("recommendation")
+                weather_condition = data.get("condition")   # e.g. "Rain", "Clear", "Clouds"
                 if ci.get("delay_risk", 0) > risk_score:
                     risk_score = ci["delay_risk"]
 
@@ -526,7 +534,9 @@ class CommuteAgent:
             urgency=           urgency,
             risk_score=        round(risk_score, 2),
             leave_by=          leave_by,
+            leave_by_iso=      leave_by_iso,
             weather_summary=   weather_summary,
+            weather_condition= weather_condition,
             disruptions=       list(set(disruptions)),
             uber_link=         self._build_uber_link(origin, destination),
             ola_link=          self._build_ola_link(origin, destination),

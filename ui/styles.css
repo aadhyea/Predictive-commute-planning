@@ -867,3 +867,98 @@ hr {
   height: 1px;
   background: rgba(255,255,255,0.12);
 }
+
+
+/* ── Weather Card ───────────────────────────────────────────── */
+
+.weather-card {
+  border-radius: var(--radius-lg);
+  padding: 18px 20px;
+  margin-bottom: 12px;
+
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+
+  border: 1px solid rgba(255,255,255,0.15);
+
+  box-shadow: var(--shadow-md);
+  transition: all var(--transition);
+}
+
+.weather-card:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-lg);
+}
+
+/* Layout */
+.weather-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.weather-icon {
+  font-size: 1.8rem;
+}
+
+.weather-title {
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: inherit !important;
+}
+
+.weather-desc {
+  font-size: 0.8rem;
+  opacity: 0.85;
+  color: inherit !important;
+}
+
+/* ── Variants ────────────────────────────────────────────────
+   Light card  → dark text  (#1a1f2e range)
+   Dark  card  → light text (#e8f0fe range)
+   ─────────────────────────────────────────────────────────── */
+/* TEXT SYSTEM */
+.weather-card.light {
+  color: #0F172A;
+}
+
+.weather-card.light .weather-desc {
+  color: rgba(15, 23, 42, 0.7);
+}
+
+.weather-card.dark {
+  color: #F9FAFB;
+}
+
+.weather-card.dark .weather-desc {
+  color: rgba(249, 250, 251, 0.75);
+}
+
+.weather-card.sunny {
+  background: linear-gradient(135deg, #FFF3B0, #FFD166);
+}
+
+.weather-card.cloudy {
+  background: linear-gradient(135deg, #E5E7EB, #CBD5F5);
+}
+
+.weather-card.partly {
+  background: linear-gradient(135deg, #DCEEFF, #B6CCFE);
+}
+
+.weather-card.rain {
+  background: linear-gradient(135deg, #4B6CB7, #182848);
+}
+
+.weather-card.storm {
+  background: linear-gradient(135deg, #0F2027, #203A43, #2C5364);
+}
+
+.weather-card.snow {
+  background: linear-gradient(135deg, #E0F7FA, #FFFFFF);
+}
+
+.weather-card.fog {
+  background: linear-gradient(135deg, #D7DDE8, #757F9A);
+}

@@ -35,6 +35,11 @@ from database.supabase_client import get_client, supabase
 handle_auth_callback()
 if "page" not in st.session_state:
     st.session_state["page"] = "login"
+# Guest access via URL param — set by JS onclick on the styled link
+if st.query_params.get("action") == "guest":
+    st.query_params.clear()
+    st.session_state["page"] = "app"
+    st.session_state["user"] = None
 # Auto-redirect if a session was resolved by handle_auth_callback
 if is_logged_in() and st.session_state["page"] == "login":
     st.session_state["page"] = "app"
@@ -237,8 +242,10 @@ def _url_to_qr_bytes(url: str) -> bytes:
     """Return PNG bytes of a QR code for the given URL."""
     import io
     import qrcode
-    qr = qrcode.QRCode(box_size=4, border=2,
-                       error_correction=qrcode.constants.ERROR_CORRECT_L)
+    # ERROR_CORRECT_M (15% redundancy) is more scannable than L (7%),
+    # especially for longer URLs. box_size=8 gives a crisp image at 200px display.
+    qr = qrcode.QRCode(box_size=8, border=2,
+                       error_correction=qrcode.constants.ERROR_CORRECT_M)
     qr.add_data(url)
     qr.make(fit=True)
     img = qr.make_image(fill_color="black", back_color="white")
@@ -248,34 +255,29 @@ def _url_to_qr_bytes(url: str) -> bytes:
 
 
 # ── Cab deep-link builders ────────────────────────────────────────────────────
-def _build_uber_link(origin: str, dest: str, o_geo=None, d_geo=None) -> str:
-    """Web link for the button (opens uber.com)."""
+def _build_rapido_link(origin: str, dest: str) -> str:
+    """
+    Rapido SEO deep link — encodes pickup and drop as path segments.
+    Format: https://m.rapido.bike/unup-home/seo/{pickup}/{drop}?version=v3
+    Works as a QR code scanned on mobile; opens Rapido with locations pre-filled.
+    """
     from urllib.parse import quote
-    url = "https://m.uber.com/ul/?action=setPickup"
-    if o_geo:
-        url += f"&pickup[latitude]={o_geo['lat']}&pickup[longitude]={o_geo['lng']}"
-    url += f"&pickup[nickname]={quote(origin)}&pickup[formatted_address]={quote(origin)}"
-    if d_geo:
-        url += f"&dropoff[latitude]={d_geo['lat']}&dropoff[longitude]={d_geo['lng']}"
-    url += f"&dropoff[nickname]={quote(dest)}&dropoff[formatted_address]={quote(dest)}"
-    return url
-
-
-def _build_uber_qr_link(origin: str, dest: str, o_geo=None, d_geo=None) -> str:
-    """Universal Link for Uber QR code — opens app if installed, mobile web otherwise."""
-    return _build_uber_link(origin, dest, o_geo, d_geo)
+    return f"https://m.rapido.bike/unup-home/seo/{quote(origin, safe='')}/{quote(dest, safe='')}?version=v3"
 
 
 def _build_ola_link(origin: str, dest: str, o_geo=None, d_geo=None) -> str:
+    """
+    Ola booking link — book.olacabs.com supports pickup/drop prefill via query params.
+    Works both as a button (web) and as a QR code scanned on mobile.
+    """
     from urllib.parse import quote
-    url = "https://book.olacabs.com/?"
+    v = lambda s: quote(str(s), safe="")
+    params = [f"pickup_name={v(origin)}", f"drop_name={v(dest)}"]
     if o_geo:
-        url += f"pickup_lat={o_geo['lat']}&pickup_lng={o_geo['lng']}&"
-    url += f"pickup_name={quote(origin)}"
+        params += [f"pickup_lat={v(o_geo['lat'])}", f"pickup_lng={v(o_geo['lng'])}"]
     if d_geo:
-        url += f"&drop_lat={d_geo['lat']}&drop_lng={d_geo['lng']}"
-    url += f"&drop_name={quote(dest)}&utm_source=commuteagent"
-    return url
+        params += [f"drop_lat={v(d_geo['lat'])}", f"drop_lng={v(d_geo['lng'])}"]
+    return "https://book.olacabs.com/?" + "&".join(params)
 
 
 # ── Route card renderer ───────────────────────────────────────────────────────
@@ -581,10 +583,7 @@ button[data-testid="baseButton-secondary"]:hover {
     # ── Right panel — guest shortcut at top ───────────────────────────────────
     st.markdown("""
 <div class="login-guest-row">
-  <span class="login-guest-link"
-    onclick="(function(){var btns=window.parent.document.querySelectorAll('button');for(var b of btns){if(b.innerText.includes('guest')){b.click();break;}}})()">
-    Continue as guest →
-  </span>
+  <a class="login-guest-link" href="?action=guest" target="_top">Continue as guest →</a>
 </div>
 <div class="login-heading">Welcome !</div>
 <div class="login-subheading">Plan smarter. Commute better.</div>
@@ -608,11 +607,6 @@ button[data-testid="baseButton-secondary"]:hover {
     else:
         st.error("Google sign-in is unavailable right now.")
 
-    # ── Guest access — hidden button clicked via JS from the top link ────────
-    if st.button("Continue as guest →", type="secondary", key="guest_btn"):
-        st.session_state["page"] = "app"
-        st.session_state["user"] = None
-        st.rerun()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -772,19 +766,42 @@ def render_app():
         # ── Saved Commutes ────────────────────────────────────────────
         _sidebar_user = get_current_user()
         if _sidebar_user:
+            # Process any pending delete BEFORE fetching/rendering the list.
+            # This avoids doing DB work inside a button handler inside a loop.
+            if "pending_delete_commute_id" in st.session_state:
+                _pending_id  = st.session_state.pop("pending_delete_commute_id")
+                # Use the same token source as save_commute — supabase.auth.get_session()
+                # is always fresh after handle_auth_callback() runs at the top of every rerun.
+                _del_session = supabase.auth.get_session()
+                _del_token   = (
+                    _del_session.access_token
+                    if _del_session and hasattr(_del_session, "access_token")
+                    else st.session_state.get("_sb_access_token")
+                )
+                if _del_token:
+                    get_client().delete_saved_commute(_del_token, _pending_id)
+                else:
+                    st.session_state["delete_commute_error"] = (
+                        "Session expired — please sign out and sign in again."
+                    )
+
             saved = get_client().get_saved_commutes(_sidebar_user.id)
+            if st.session_state.get("delete_commute_error"):
+                st.error(st.session_state.pop("delete_commute_error"))
             if saved:
-                with st.expander("🔖 Saved Commutes", expanded=False):
+                with st.expander("🔖 Saved Commutes", expanded=True):
                     for c in saved:
+                        _mode_badge = {"cab": "🚕", "metro_hybrid": "🚇", "transit": "🚌"}.get(
+                            c.get("mode", ""), ""
+                        )
+                        _btn_label = f"{_mode_badge} {c['name']}".strip()
                         col_btn, col_del = st.columns([5, 1])
                         with col_btn:
-                            if st.button(c["name"], key=f"saved_{c['id']}", use_container_width=True):
+                            if st.button(_btn_label, key=f"saved_{c['id']}", use_container_width=True):
                                 _quick_fill(c["origin"], c["destination"])
                         with col_del:
-                            if st.button("✕", key=f"del_{c['id']}", help="Remove", type="tertiary"):
-                                _del_session = supabase.auth.get_session()
-                                if _del_session and _del_session.access_token:
-                                    get_client().delete_saved_commute(_del_session.access_token, c["id"])
+                            if st.button("✕", key=f"del_{c['id']}", help="Remove"):
+                                st.session_state["pending_delete_commute_id"] = c["id"]
                                 st.rerun()
 
         # ── Status card (bottom) ──────────────────────────────────────
@@ -858,7 +875,7 @@ def render_app():
     # ══════════════════════════════════════════════════════════════════════════
     with tab_plan:
 
-        col_o, col_d = st.columns(2)
+        col_o, col_swap, col_d = st.columns([10, 1, 10])
         with col_o:
             st.markdown("**🏠 From**")
             origin = st_searchbox(
@@ -869,6 +886,20 @@ def render_app():
                 key="origin_searchbox",
                 clear_on_submit=False,
             )
+        with col_swap:
+            st.markdown("<div style='height:1.78rem padding:'0rm 0.75rm'></div>", unsafe_allow_html=True)
+            if st.button("⇅", key="swap_btn", help="Swap origin and destination", use_container_width=True):
+                import time as _swap_t
+                _o = st.session_state.get("_origin_fill") or st.session_state.get("origin_input", "")
+                _d = st.session_state.get("_dest_fill")   or st.session_state.get("destination_input", "")
+                _ts = _swap_t.time()
+                st.session_state["_origin_fill"]      = _d
+                st.session_state["_dest_fill"]        = _o
+                st.session_state["origin_input"]      = _d
+                st.session_state["destination_input"] = _o
+                st.session_state["origin_searchbox"]  = {"result": _d, "search": _d, "options_js": [], "key_react": f"origin_searchbox_react_{_ts}"}
+                st.session_state["dest_searchbox"]    = {"result": _o, "search": _o, "options_js": [], "key_react": f"dest_searchbox_react_{_ts}"}
+                st.rerun()
         with col_d:
             st.markdown("**🏢 To**")
             destination = st_searchbox(
@@ -973,13 +1004,16 @@ def render_app():
                                 if step.get("mode") == "metro" and step.get("line"):
                                     metro_line = step["line"]
                                     break
-                            if rec.get("departure_time"):
-                                dep_iso = rec["departure_time"]
-                            elif result.leave_by:
-                                dep_iso = result.leave_by
+                            # Prefer leave_by_iso from the agent (full ISO datetime, same value
+                            # the agent passed to get_comfort_advisory) so trace and card match.
+                            # Fall back to arrival - route_duration when agent skipped calculate_leave_time.
+                            if result.leave_by_iso:
+                                dep_iso = result.leave_by_iso
                             else:
+                                _route_mins = rec.get("total_duration_minutes", 45)
                                 try:
-                                    dep_iso = (datetime.fromisoformat(required_arrival) - timedelta(minutes=45)).isoformat()
+                                    _arrival_dt = datetime.fromisoformat(required_arrival)
+                                    dep_iso = (_arrival_dt - timedelta(minutes=_route_mins)).isoformat()
                                 except Exception:
                                     dep_iso = required_arrival
                             comfort_inp = {
@@ -1030,15 +1064,55 @@ def render_app():
             with r1c1:
                 wx      = result.weather_summary or "Weather data not available."
                 risk    = result.risk_score
-                wx_icon = "🌤️" if risk < 0.3 else ("🌧️" if risk < 0.6 else "⛈️")
+                _wc     = (getattr(result, "weather_condition", None) or "").lower()
+                if any(w in _wc for w in ("thunderstorm", "tornado")):
+                    wx_icon = "⛈️"
+                elif any(w in _wc for w in ("rain", "drizzle")):
+                    wx_icon = "🌧️"
+                elif "snow" in _wc:
+                    wx_icon = "🌨️"
+                elif any(w in _wc for w in ("mist", "fog", "haze", "smoke", "dust", "sand")):
+                    wx_icon = "🌫️"
+                elif "clear" in _wc:
+                    wx_icon = "☀️"
+                elif "cloud" in _wc:
+                    wx_icon = "⛅"
+                else:
+                    wx_icon = "🌤️"
                 _wx_city  = st.session_state.get("detected_city") or ""
                 _wx_label = f"Weather in {_wx_city}" if _wx_city and _wx_city != "unknown" else "Weather"
-                if risk < 0.3:
-                    st.success(f"{wx_icon} **{_wx_label}** — {wx}")
-                elif risk < 0.6:
-                    st.warning(f"{wx_icon} **{_wx_label}** — {wx}")
-                else:
-                    st.error(f"{wx_icon} **{_wx_label}** — {wx}")
+                # Color based on weather condition severity, not risk score
+                def get_weather_class(condition: str):
+                    condition = condition.lower()
+
+                    if any(w in condition for w in ("thunderstorm", "tornado", "hurricane")):
+                        return "storm dark"
+                    elif any(w in condition for w in ("rain", "drizzle", "sleet")):
+                        return "rain dark"
+                    elif any(w in condition for w in ("snow", "blizzard", "ice")):
+                        return "snow light"
+                    elif any(w in condition for w in ("mist", "fog", "haze", "smoke", "dust", "sand")):
+                        return "fog light"
+                    elif "clear" in condition or "sunny" in condition:
+                        return "sunny light"
+                    elif "cloud" in condition:
+                        return "cloudy light"
+                    else:
+                        return "partly light"
+
+                weather_class = get_weather_class(_wc)
+
+                st.markdown(f"""
+                <div class="weather-card {weather_class}">
+                    <div class="weather-header">
+                        <div class="weather-icon">{wx_icon}</div>
+                        <div>
+                            <div class="weather-title">{_wx_label}</div>
+                            <div class="weather-desc">{wx}</div>
+                        </div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
             with r1c2:
                 if result.leave_by:
                     st.metric(
@@ -1123,39 +1197,6 @@ def render_app():
 
             st.divider()
 
-            # Save this commute
-            with st.expander("🔖 Save this commute", expanded=False):
-                if require_auth("saved commutes"):
-                    _origin      = st.session_state.get("plan_origin", "")
-                    _destination = st.session_state.get("plan_destination", "")
-                    _default_name = f"{_origin.split(',')[0]} → {_destination.split(',')[0]}"
-                    save_col1, save_col2 = st.columns([3, 1])
-                    with save_col1:
-                        save_name = st.text_input(
-                            "Name", value=_default_name, key="save_commute_name",
-                            label_visibility="collapsed", placeholder="e.g. Home → Office",
-                        )
-                    with save_col2:
-                        if st.button("Save", key="save_commute_btn", use_container_width=True):
-                            _u       = get_current_user()
-                            _session = supabase.auth.get_session()
-                            if save_name.strip() and _u and _session and _session.access_token:
-                                ok = get_client().save_commute(
-                                    access_token= _session.access_token,
-                                    user_id=      _u.id,
-                                    name=         save_name.strip(),
-                                    origin=       _origin,
-                                    destination=  _destination,
-                                )
-                                if ok:
-                                    st.success("Saved! It'll appear in your sidebar.")
-                                else:
-                                    st.error("Could not save — please try again.")
-                            elif _u and not (_session and _session.access_token):
-                                st.error("Session expired — please sign in again.")
-
-            st.divider()
-
             # Route options
             st.markdown("### 🛣️ Route Options")
             routes = []
@@ -1198,32 +1239,69 @@ def render_app():
                             origin_txt = st.session_state.get("plan_origin", "")
                             dest_txt   = st.session_state.get("plan_destination", "")
                             st.markdown(f"**🚕 Book this ride** · Estimated ₹{est_cost}")
-                            uber_url = _build_uber_link(origin_txt, dest_txt, o_geo, d_geo)
-                            ola_url  = _build_ola_link(origin_txt, dest_txt, o_geo, d_geo)
 
-                            uber_col, ola_col, note_col = st.columns([1, 1, 2])
-                            with uber_col:
-                                st.link_button("Open in Uber 🟡", uber_url, use_container_width=True)
+                            rapido_url = _build_rapido_link(origin_txt, dest_txt)
+                            ola_url    = _build_ola_link(origin_txt, dest_txt, o_geo, d_geo)
+
+                            rapido_col, ola_col, note_col = st.columns([1, 1, 2])
+                            with rapido_col:
+                                st.link_button("Open Rapido 🔴", rapido_url, use_container_width=True)
                                 try:
-                                    uber_qr_url = _build_uber_qr_link(origin_txt, dest_txt, o_geo, d_geo)
-                                    st.image(_url_to_qr_bytes(uber_qr_url), width=120,
-                                             caption="Scan → opens Uber with route pre-filled")
+                                    st.image(_url_to_qr_bytes(rapido_url), width=180,
+                                             caption="Scan on phone → opens Rapido with pickup & drop pre-filled")
                                 except Exception:
                                     pass
                             with ola_col:
-                                st.link_button("Open in Ola 🟢", ola_url, use_container_width=True)
+                                st.link_button("Open Ola 🟢", ola_url, use_container_width=True)
                                 try:
-                                    st.image(_url_to_qr_bytes(ola_url), width=120,
-                                             caption="Scan → opens Ola booking page")
+                                    st.image(_url_to_qr_bytes(ola_url), width=180,
+                                             caption="Scan on phone → opens Ola with pickup & drop pre-filled")
                                 except Exception:
                                     pass
                             with note_col:
                                 st.info(
-                                    "**Pickup & drop are pre-filled with coordinates.**  \n"
-                                    "If the app asks to confirm your pickup location, "
-                                    "tap **Confirm** — your address is already shown on the map.",
-                                    icon="📍",
+                                    "**Button** → opens in browser with locations pre-filled.  \n"
+                                    "**QR code** → scan on your phone to open the app with pickup "
+                                    "& drop already filled in.",
+                                    icon="📱",
                                 )
+
+                        # ── Save this route as a commute ──────────────────
+                        st.divider()
+                        with st.expander("🔖 Save this commute", expanded=False):
+                            if require_auth("saved commutes"):
+                                _origin      = st.session_state.get("plan_origin", "")
+                                _destination = st.session_state.get("plan_destination", "")
+                                _default_name = f"{_origin.split(',')[0]} → {_destination.split(',')[0]}"
+                                _tab_mode = _mode_from_label(route.get("label", ""))
+                                sc1, sc2 = st.columns([3, 1])
+                                with sc1:
+                                    save_name = st.text_input(
+                                        "Name", value=_default_name,
+                                        key=f"save_name_{i}",
+                                        label_visibility="collapsed",
+                                        placeholder="e.g. Home → Office",
+                                    )
+                                with sc2:
+                                    if st.button("Save", key=f"save_btn_{i}", use_container_width=True):
+                                        _u       = get_current_user()
+                                        _session = supabase.auth.get_session()
+                                        if save_name.strip() and _u and _session and _session.access_token:
+                                            ok = get_client().save_commute(
+                                                access_token= _session.access_token,
+                                                user_id=      _u.id,
+                                                name=         save_name.strip(),
+                                                origin=       _origin,
+                                                destination=  _destination,
+                                                mode=         _tab_mode,
+                                            )
+                                            if ok:
+                                                st.success(f"Saved as {_tab_mode} route!")
+                                                st.rerun()
+                                            else:
+                                                st.error("Could not save — please try again.")
+                                        elif _u and not (_session and _session.access_token):
+                                            st.error("Session expired — please sign in again.")
             else:
                 st.info("No route data returned — see agent explanation above.")
 
