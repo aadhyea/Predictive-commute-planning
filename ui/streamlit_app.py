@@ -1,5 +1,5 @@
 """
-Delhi Commute Agent — Streamlit UI
+Sherpa Commute Agent — Streamlit UI
 Run: streamlit run ui/streamlit_app.py
 """
 
@@ -260,17 +260,9 @@ def _build_uber_link(origin: str, dest: str, o_geo=None, d_geo=None) -> str:
     return url
 
 
-def _build_uber_app_link(origin: str, dest: str, o_geo=None, d_geo=None) -> str:
-    """Native app-scheme link for QR code — opens Uber app directly."""
-    from urllib.parse import quote
-    url = "uber://?action=setPickup"
-    if o_geo:
-        url += f"&pickup[latitude]={o_geo['lat']}&pickup[longitude]={o_geo['lng']}"
-    url += f"&pickup[nickname]={quote(origin)}"
-    if d_geo:
-        url += f"&dropoff[latitude]={d_geo['lat']}&dropoff[longitude]={d_geo['lng']}"
-    url += f"&dropoff[nickname]={quote(dest)}"
-    return url
+def _build_uber_qr_link(origin: str, dest: str, o_geo=None, d_geo=None) -> str:
+    """Universal Link for Uber QR code — opens app if installed, mobile web otherwise."""
+    return _build_uber_link(origin, dest, o_geo, d_geo)
 
 
 def _build_ola_link(origin: str, dest: str, o_geo=None, d_geo=None) -> str:
@@ -287,14 +279,12 @@ def _build_ola_link(origin: str, dest: str, o_geo=None, d_geo=None) -> str:
 
 # ── Route card renderer ───────────────────────────────────────────────────────
 def render_route_card(route: Dict[str, Any], is_best: bool = False):
-    # Metrics row
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("⏱ Duration",  fmt_duration(route.get("total_duration_minutes", 0)))
     c2.metric("💰 Cost",      f"₹{route.get('total_cost_rupees', 0)}")
     c3.metric("✅ On-time",   f"{round(route.get('on_time_probability', 0) * 100)}%")
     c4.metric("🔀 Transfers", route.get("num_transfers", 0))
 
-    # Arrival time + distance
     meta_parts = []
     try:
         arr = datetime.fromisoformat(route["arrival_time"])
@@ -307,18 +297,17 @@ def render_route_card(route: Dict[str, Any], is_best: bool = False):
     if meta_parts:
         st.caption("  ·  ".join(meta_parts))
 
-    # Steps
     steps = route.get("steps", [])
     if steps:
         with st.expander("Step-by-step", expanded=is_best):
             for step in steps:
-                icon = mode_icon(step.get("mode", ""))
-                dur  = fmt_duration(step.get("duration_minutes", 0))
+                icon   = mode_icon(step.get("mode", ""))
+                dur    = fmt_duration(step.get("duration_minutes", 0))
                 dist_s = step.get("distance_km", 0)
-                inst = step.get("instruction", "")
-                line = step.get("line", "")
+                inst   = step.get("instruction", "")
+                line   = step.get("line", "")
                 line_str = f" · *{line}*" if line else ""
-                cost_s = step.get("cost_rupees", 0)
+                cost_s   = step.get("cost_rupees", 0)
                 cost_str = f" · ₹{cost_s}" if cost_s else ""
                 st.markdown(
                     f"{icon} **{dur}** · {dist_s:.1f} km{line_str}{cost_str}  \n"
@@ -326,7 +315,6 @@ def render_route_card(route: Dict[str, Any], is_best: bool = False):
                     unsafe_allow_html=True,
                 )
 
-    # Notes
     for note in route.get("notes", []):
         st.warning(note, icon="⚠️")
 
@@ -440,27 +428,41 @@ def render_app():
             index=0,
             help="Auto-detect reads the city from your origin address. Override if detection is wrong.",
         )
-        # Persist so it survives reruns without being inside the form
         st.session_state["city_override"] = city_override
 
         st.divider()
         st.markdown("### 📍 Quick Fill")
         def _quick_fill(origin: str, dest: str):
-            st.session_state["prefill_origin"]      = origin
-            st.session_state["prefill_destination"] = dest
-            for key in ("origin_searchbox", "dest_searchbox",
-                        "origin_searchbox_options", "dest_searchbox_options"):
-                st.session_state.pop(key, None)
-            st.rerun()
+            import time as _time
+            st.session_state["origin_input"]      = origin
+            st.session_state["destination_input"] = dest
+            # _origin_fill / _dest_fill drive default_searchterm in the st_searchbox
+            # calls below — that prop is what React actually shows in the input on mount.
+            st.session_state["_origin_fill"] = origin
+            st.session_state["_dest_fill"]   = dest
+            # Changing key_react forces React to remount, picking up default_searchterm.
+            _t = _time.time()
+            st.session_state["origin_searchbox"] = {
+                "result": origin, "search": origin,
+                "options_js": [], "key_react": f"origin_searchbox_react_{_t}",
+            }
+            st.session_state["dest_searchbox"] = {
+                "result": dest, "search": dest,
+                "options_js": [], "key_react": f"dest_searchbox_react_{_t}",
+            }
 
         if st.button("🏠 Delhi: Rajiv Chowk → Cyber City", use_container_width=True):
             _quick_fill("Rajiv Chowk Metro Station, Delhi", "Cyber City, Gurugram")
+            st.rerun()
         if st.button("📍 Delhi: CP → Noida Sector 62", use_container_width=True):
             _quick_fill("Connaught Place, New Delhi", "Noida Sector 62, Uttar Pradesh")
+            st.rerun()
         if st.button("✈️ Bangalore: Indiranagar → Whitefield", use_container_width=True):
             _quick_fill("Indiranagar, Bengaluru", "Whitefield, Bengaluru")
+            st.rerun()
         if st.button("🌊 Mumbai: Andheri → Bandra Kurla Complex", use_container_width=True):
             _quick_fill("Andheri Station, Mumbai", "Bandra Kurla Complex, Mumbai")
+            st.rerun()
 
         st.divider()
         st.markdown("### 🌐 Language")
@@ -514,8 +516,8 @@ def render_app():
     st.divider()
 
     # ── Proactive alerts — checked inline on each page load ──────────────────
-    _alert_user = get_current_user()
-    _last_check = st.session_state.get("alerts_last_checked_at")
+    _alert_user  = get_current_user()
+    _last_check  = st.session_state.get("alerts_last_checked_at")
     _should_check = (
         _last_check is None or
         (datetime.now() - _last_check) > timedelta(minutes=15)
@@ -524,7 +526,7 @@ def render_app():
         try:
             from services.memory_service import detect_patterns
             from services.alert_service import _is_departure_window, generate_alerts
-            _history = get_client().get_trip_history(_alert_user.id)
+            _history  = get_client().get_trip_history(_alert_user.id)
             _patterns = detect_patterns(_history)
             if _patterns and _is_departure_window(_patterns.get("usual_departure_hour")):
                 _alerts = run_async(generate_alerts(_patterns))
@@ -538,7 +540,7 @@ def render_app():
                 st.session_state["pending_alerts"] = []
             st.session_state["alerts_last_checked_at"] = datetime.now()
         except Exception as e:
-            st.sidebar.error(f"Alert check error: {e}")  # CHANGE THIS LINE
+            st.sidebar.error(f"Alert check error: {e}")
 
     for _alert in st.session_state.get("pending_alerts", []):
         if _alert["severity"] == "warning":
@@ -555,14 +557,14 @@ def render_app():
     # ══════════════════════════════════════════════════════════════════════════
     with tab_plan:
 
-        # ── Origin / Destination searchboxes (must be outside st.form for autocomplete) ──
         col_o, col_d = st.columns(2)
         with col_o:
             st.markdown("**🏠 From**")
             origin = st_searchbox(
                 search_places_autocomplete,
                 placeholder="Start typing your origin…",
-                default=st.session_state.get("prefill_origin", "Rajiv Chowk Metro Station, Delhi"),
+                default=st.session_state.get("origin_input", "Rajiv Chowk Metro Station, Delhi"),
+                default_searchterm=st.session_state.get("_origin_fill", ""),
                 key="origin_searchbox",
                 clear_on_submit=False,
             )
@@ -571,15 +573,14 @@ def render_app():
             destination = st_searchbox(
                 search_places_autocomplete,
                 placeholder="Start typing your destination…",
-                default=st.session_state.get("prefill_destination", "Cyber City, Gurugram"),
+                default=st.session_state.get("destination_input", "Cyber City, Gurugram"),
+                default_searchterm=st.session_state.get("_dest_fill", ""),
                 key="dest_searchbox",
                 clear_on_submit=False,
             )
 
-        # ── Remaining inputs + submit (inside form to batch the submit action) ──
         with st.form("plan_form"):
             col_date, col_time, col_extra = st.columns([1, 1, 2])
-
             with col_date:
                 travel_date = st.date_input("📅 Date", value=date.today())
             with col_time:
@@ -589,25 +590,23 @@ def render_app():
                     "💬 Extra context (optional)",
                     placeholder="e.g. carrying heavy luggage, it's raining outside…",
                 )
-
             submitted = st.form_submit_button(
                 "🔍  Plan My Commute", use_container_width=True, type="primary"
             )
 
         # ── Run agent on submit ───────────────────────────────────────────────
         if submitted:
-            # st_searchbox returns None until user selects; fall back to session default
-            origin      = origin      or st.session_state.get("prefill_origin", "")
-            destination = destination or st.session_state.get("prefill_destination", "")
+            origin      = origin      or st.session_state.get("origin_input", "")
+            destination = destination or st.session_state.get("destination_input", "")
             if not (origin or "").strip() or not (destination or "").strip():
                 st.error("Please enter both origin and destination.")
             else:
                 required_arrival = datetime.combine(travel_date, arrival_time).isoformat()
 
                 user_prefs = {
-                    "buffer_minutes":         buffer_minutes,
+                    "buffer_minutes":            buffer_minutes,
                     "prefer_comfort_over_speed": prefer_comfort,
-                    "max_walking_minutes":    max_walk,
+                    "max_walking_minutes":       max_walk,
                 }
 
                 with st.spinner("🤖 Agent is planning your commute…"):
@@ -634,20 +633,21 @@ def render_app():
                             _session = supabase.auth.get_session()
                             if _session and _session.access_token:
                                 _log_trip_background(_session.access_token, _user.id, result, origin, destination)
+
                         # Geocode once and cache for maps + city detection
                         o_geo, d_geo = geocode_endpoints(origin, destination)
                         st.session_state["plan_o_geo"] = o_geo
                         st.session_state["plan_d_geo"] = d_geo
-                        # Detect city from geocode result
-                        auto_city = extract_city_from_geo(o_geo)
+                        auto_city   = extract_city_from_geo(o_geo)
                         chosen_city = st.session_state.get("city_override", "Auto-detect")
                         st.session_state["detected_city"] = (
                             chosen_city if chosen_city != "Auto-detect" else auto_city
                         )
-                        # Comfort advisory — infer metro line from recommended route steps
+
+                        # Comfort advisory
                         try:
                             from agent.tools import _get_comfort_advisory
-                            rec = result.recommended_route or {}
+                            rec        = result.recommended_route or {}
                             metro_line = "Generic"
                             for step in rec.get("steps", []):
                                 if step.get("mode") == "metro" and step.get("line"):
@@ -663,15 +663,16 @@ def render_app():
                                 except Exception:
                                     dep_iso = required_arrival
                             comfort_inp = {
-                                "lat": o_geo["lat"] if o_geo else None,
-                                "lon": o_geo["lng"] if o_geo else None,
-                                "metro_line": metro_line,
+                                "lat":               o_geo["lat"] if o_geo else None,
+                                "lon":               o_geo["lng"] if o_geo else None,
+                                "metro_line":        metro_line,
                                 "departure_time_iso": dep_iso,
                             }
                             comfort_data = run_async(_get_comfort_advisory(comfort_inp))
                             st.session_state["comfort_advisory"] = comfort_data
                         except Exception:
                             st.session_state.pop("comfort_advisory", None)
+
                     except Exception as e:
                         st.error(f"Agent error: {e}")
                         st.session_state.pop("plan_result", None)
@@ -680,7 +681,7 @@ def render_app():
         if result := st.session_state.get("plan_result"):
             st.divider()
 
-            # ── Route preview card ────────────────────────────────────────────
+            # Route preview card
             _po = st.session_state.get("plan_origin", "")
             _pd = st.session_state.get("plan_destination", "")
             _o_html = _po if _po else '<span class="rp-text-muted">Unknown origin</span>'
@@ -698,7 +699,7 @@ def render_app():
             )
 
             # City detection banner
-            detected_city = st.session_state.get("detected_city", "unknown")
+            detected_city     = st.session_state.get("detected_city", "unknown")
             city_override_val = st.session_state.get("city_override", "Auto-detect")
             if detected_city and detected_city != "unknown":
                 source_note = " (manually selected)" if city_override_val != "Auto-detect" else " (auto-detected)"
@@ -706,12 +707,11 @@ def render_app():
 
             # Row 1: Weather | Leave-by | Urgency
             r1c1, r1c2, r1c3 = st.columns([2, 2, 1])
-
             with r1c1:
-                wx   = result.weather_summary or "Weather data not available."
-                risk = result.risk_score
+                wx      = result.weather_summary or "Weather data not available."
+                risk    = result.risk_score
                 wx_icon = "🌤️" if risk < 0.3 else ("🌧️" if risk < 0.6 else "⛈️")
-                _wx_city = st.session_state.get("detected_city") or ""
+                _wx_city  = st.session_state.get("detected_city") or ""
                 _wx_label = f"Weather in {_wx_city}" if _wx_city and _wx_city != "unknown" else "Weather"
                 if risk < 0.3:
                     st.success(f"{wx_icon} **{_wx_label}** — {wx}")
@@ -719,7 +719,6 @@ def render_app():
                     st.warning(f"{wx_icon} **{_wx_label}** — {wx}")
                 else:
                     st.error(f"{wx_icon} **{_wx_label}** — {wx}")
-
             with r1c2:
                 if result.leave_by:
                     st.metric(
@@ -729,7 +728,6 @@ def render_app():
                     )
                 else:
                     st.info("See agent recommendation for departure time.")
-
             with r1c3:
                 urgency_icons = {"LOW": "🟢", "MEDIUM": "🟡", "HIGH": "🟠", "CRITICAL": "🔴"}
                 icon = urgency_icons.get(result.urgency.upper(), "⚪")
@@ -741,20 +739,17 @@ def render_app():
 
             st.divider()
 
-            # Row 2: Agent recommendation — summary + expandable full text
+            # Agent recommendation
             st.markdown("### 🤖 Agent Recommendation")
-
-            # Show only the first paragraph/block as the headline summary
             paragraphs = [p.strip() for p in result.explanation.split("\n\n") if p.strip()]
             if paragraphs:
-                st.info(paragraphs[0])          # first paragraph prominent
+                st.info(paragraphs[0])
                 if len(paragraphs) > 1:
                     with st.expander("Full analysis", expanded=False):
                         st.markdown("\n\n".join(paragraphs[1:]))
             else:
                 st.info(result.explanation[:300] + ("…" if len(result.explanation) > 300 else ""))
 
-            # Disruptions
             for d in result.disruptions:
                 st.warning(d, icon="🚨")
 
@@ -764,75 +759,51 @@ def render_app():
                     for i, step in enumerate(result.tool_trace, 1):
                         name    = step.get("name", "")
                         summary = step.get("summary", "")
-                        st.markdown(
-                            f"`[{i}]` **{name}** &nbsp;→&nbsp; {summary}",
-                            unsafe_allow_html=True,
-                        )
+                        st.markdown(f"`[{i}]` **{name}** &nbsp;→&nbsp; {summary}", unsafe_allow_html=True)
             elif result.tool_calls_made:
                 with st.expander("🔍 Agent reasoning trace", expanded=False):
                     for i, name in enumerate(result.tool_calls_made, 1):
                         st.markdown(f"`[{i}]` **{name}**")
-                    
-            # ── Comfort Advisory (heat index + crowding + proactive alert) ──────
+
+            # Comfort Advisory
             comfort = st.session_state.get("comfort_advisory")
             if comfort:
                 st.divider()
                 st.markdown("### 🌡️ Comfort Advisory")
-
                 ca_col1, ca_col2 = st.columns(2)
-
                 with ca_col1:
                     heat_cat   = comfort.get("heat_category", "comfortable")
                     heat_index = comfort.get("heat_index_c", "—")
                     heat_adv   = comfort.get("heat_advisory", "")
-                    heat_color = {
-                        "comfortable": "🟢",
-                        "warm":        "🟡",
-                        "hot":         "🟠",
-                        "dangerous":   "🔴",
-                    }.get(heat_cat, "⚪")
-                    st.metric(
-                        label=f"{heat_color} Heat Index",
-                        value=f"{heat_index}°C",
-                        help=heat_adv,
-                    )
+                    heat_color = {"comfortable": "🟢", "warm": "🟡", "hot": "🟠", "dangerous": "🔴"}.get(heat_cat, "⚪")
+                    st.metric(label=f"{heat_color} Heat Index", value=f"{heat_index}°C", help=heat_adv)
                     st.caption(heat_adv)
-
                 with ca_col2:
                     crowd_lbl  = comfort.get("crowding_label", "unknown")
                     crowd_occ  = comfort.get("crowding_occupancy", 0)
                     metro_line = comfort.get("metro_line", "Metro")
-                    crowd_icon = {
-                        "empty":        "🟢",
-                        "moderate":     "🟡",
-                        "crowded":      "🟠",
-                        "very crowded": "🔴",
-                    }.get(crowd_lbl, "⚪")
+                    crowd_icon = {"empty": "🟢", "moderate": "🟡", "crowded": "🟠", "very crowded": "🔴"}.get(crowd_lbl, "⚪")
                     peak_badge = " (Peak)" if comfort.get("is_peak") else " (Off-peak)"
                     st.metric(
                         label=f"{crowd_icon} {metro_line} Crowding",
                         value=f"{crowd_lbl.title()}{peak_badge}",
                         help=f"{int(crowd_occ * 100)}% occupancy",
                     )
-                    coach_tip = comfort.get("coach_tip", "")
-                    if coach_tip:
+                    if coach_tip := comfort.get("coach_tip", ""):
                         st.caption(f"💡 {coach_tip}")
-
                 if reasoning := comfort.get("reasoning"):
                     st.info(reasoning, icon="🤖")
-
                 if early := comfort.get("early_departure"):
-                    suggest_time = early.get("suggested_departure", "")
-                    reason_text  = early.get("reason", "")
-                    mins_saved   = early.get("minutes_saved", 0)
                     st.warning(
-                        f"**Leave earlier — {suggest_time}** saves ~{mins_saved} min of crowding.  \n"
-                        f"{reason_text}",
+                        f"**Leave earlier — {early.get('suggested_departure', '')}** "
+                        f"saves ~{early.get('minutes_saved', 0)} min of crowding.  \n"
+                        f"{early.get('reason', '')}",
                         icon="⚡",
                     )
+
             st.divider()
-            
-            # ── Save this commute ──────────────────────────────────────────────
+
+            # Save this commute
             with st.expander("🔖 Save this commute", expanded=False):
                 if require_auth("saved commutes"):
                     _origin      = st.session_state.get("plan_origin", "")
@@ -842,12 +813,11 @@ def render_app():
                     with save_col1:
                         save_name = st.text_input(
                             "Name", value=_default_name, key="save_commute_name",
-                            label_visibility="collapsed",
-                            placeholder="e.g. Home → Office",
+                            label_visibility="collapsed", placeholder="e.g. Home → Office",
                         )
                     with save_col2:
                         if st.button("Save", key="save_commute_btn", use_container_width=True):
-                            _u = get_current_user()
+                            _u       = get_current_user()
                             _session = supabase.auth.get_session()
                             if save_name.strip() and _u and _session and _session.access_token:
                                 ok = get_client().save_commute(
@@ -866,9 +836,8 @@ def render_app():
 
             st.divider()
 
-            # Row 3: Route options in tabs (full width per route)
+            # Route options
             st.markdown("### 🛣️ Route Options")
-
             routes = []
             if result.recommended_route:
                 routes.append(result.recommended_route)
@@ -891,7 +860,6 @@ def render_app():
                     with tab:
                         render_route_card(route, is_best=is_best)
 
-                        # ── Route map (per tab) ───────────────────────────────
                         if o_geo and d_geo:
                             polyline = route.get("overview_polyline", "")
                             fmap = build_route_map(
@@ -904,13 +872,12 @@ def render_app():
                             st_folium(fmap, use_container_width=True, height=380,
                                       returned_objects=[], key=f"route_map_{i}")
 
-                        # ── Cab booking buttons + QR codes ───────────────────
                         route_label = route.get("label", "").lower()
                         if "cab" in route_label:
-                            est_cost = route.get("total_cost_rupees", 0)
-                            st.markdown(f"**🚕 Book this ride** · Estimated ₹{est_cost}")
+                            est_cost   = route.get("total_cost_rupees", 0)
                             origin_txt = st.session_state.get("plan_origin", "")
                             dest_txt   = st.session_state.get("plan_destination", "")
+                            st.markdown(f"**🚕 Book this ride** · Estimated ₹{est_cost}")
                             uber_url = _build_uber_link(origin_txt, dest_txt, o_geo, d_geo)
                             ola_url  = _build_ola_link(origin_txt, dest_txt, o_geo, d_geo)
 
@@ -918,20 +885,25 @@ def render_app():
                             with uber_col:
                                 st.link_button("Open in Uber 🟡", uber_url, use_container_width=True)
                                 try:
-                                    uber_app_url = _build_uber_app_link(origin_txt, dest_txt, o_geo, d_geo)
-                                    st.image(_url_to_qr_bytes(uber_app_url), width=120,
-                                             caption="Scan to open Uber app")
+                                    uber_qr_url = _build_uber_qr_link(origin_txt, dest_txt, o_geo, d_geo)
+                                    st.image(_url_to_qr_bytes(uber_qr_url), width=120,
+                                             caption="Scan → opens Uber with route pre-filled")
                                 except Exception:
                                     pass
                             with ola_col:
                                 st.link_button("Open in Ola 🟢", ola_url, use_container_width=True)
                                 try:
                                     st.image(_url_to_qr_bytes(ola_url), width=120,
-                                             caption="Scan to open Ola app")
+                                             caption="Scan → opens Ola booking page")
                                 except Exception:
                                     pass
                             with note_col:
-                                st.caption("📱 Scan the QR code with your phone to open the app with source & destination pre-filled.")
+                                st.info(
+                                    "**Pickup & drop are pre-filled with coordinates.**  \n"
+                                    "If the app asks to confirm your pickup location, "
+                                    "tap **Confirm** — your address is already shown on the map.",
+                                    icon="📍",
+                                )
             else:
                 st.info("No route data returned — see agent explanation above.")
 
@@ -943,7 +915,7 @@ def render_app():
         if not require_auth("My Commutes"):
             pass
         else:
-            _mc_user = get_current_user()
+            _mc_user  = get_current_user()
             _mc_trips = get_client().get_trip_history(_mc_user.id, limit=50)
 
             if len(_mc_trips) < 5:
@@ -959,9 +931,8 @@ def render_app():
                 from services.memory_service import detect_savings_opportunities
                 _mc_opps = detect_savings_opportunities(_mc_spend, _mc_trips)
 
-                # ── Agent insight card ────────────────────────────────────────
-                _mc_total   = _mc_spend.get("total_spent", 0)
-                _mc_saving  = sum(o["saving"] for o in _mc_opps[:3])
+                _mc_total       = _mc_spend.get("total_spent", 0)
+                _mc_saving      = sum(o["saving"] for o in _mc_opps[:3])
                 _mc_month_label = datetime.now().strftime("%B %Y")
 
                 if _mc_saving > 0 and _mc_opps:
@@ -980,7 +951,6 @@ def render_app():
                 else:
                     st.info("No spend recorded for this month yet.", icon="💡")
 
-                # ── Monthly spend bar chart ───────────────────────────────────
                 _mc_by_mode = _mc_spend.get("by_mode", {})
                 if _mc_by_mode:
                     st.markdown(f"### Monthly Spend — {_mc_month_label}")
@@ -990,14 +960,12 @@ def render_app():
                         "Spend (₹)": list(_mc_by_mode.values()),
                     }).set_index("Mode")
                     st.bar_chart(_mc_chart, use_container_width=True, height=260)
-
                     _mc_cols = st.columns(len(_mc_by_mode))
                     for _col, (_mode, _amt) in zip(_mc_cols, _mc_by_mode.items()):
                         _col.metric(f"{_mode.title()} spend", f"₹{_amt}")
 
                 st.divider()
 
-                # ── Savings opportunities table ───────────────────────────────
                 if _mc_opps:
                     st.markdown("### 💰 Savings Opportunities")
                     st.caption("Trips where you took a cab but metro was available or cheaper.")
@@ -1010,17 +978,16 @@ def render_app():
                 else:
                     st.success("No savings opportunities found — you're already commuting efficiently!", icon="✅")
 
+
     # ══════════════════════════════════════════════════════════════════════════
     # TAB 3 — CHAT
     # ══════════════════════════════════════════════════════════════════════════
     with tab_chat:
         st.markdown("Ask anything about your commute — the agent has access to real-time weather, routes, and metro data.")
 
-        # Initialise history
         if "chat_history" not in st.session_state:
             st.session_state["chat_history"] = []
 
-        # Display existing messages
         for msg in st.session_state["chat_history"]:
             role = msg["role"]
             text = msg["text"]
@@ -1031,7 +998,6 @@ def render_app():
 
         st.markdown("<br>", unsafe_allow_html=True)
 
-        # Input
         with st.form("chat_form", clear_on_submit=True):
             chat_col1, chat_col2 = st.columns([5, 1])
             with chat_col1:
@@ -1044,9 +1010,7 @@ def render_app():
                 chat_submitted = st.form_submit_button("Send", use_container_width=True, type="primary")
 
         if chat_submitted and user_input.strip():
-            # Build history for agent (only last 10 turns to keep context short)
             history = st.session_state["chat_history"][-10:]
-
             st.session_state["chat_history"].append({"role": "user", "text": user_input})
 
             with st.spinner("Agent is thinking…"):
