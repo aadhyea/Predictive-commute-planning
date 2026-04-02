@@ -9,6 +9,8 @@ import sys
 import os
 from datetime import datetime, date, time, timedelta
 from typing import Any, Dict, List, Optional
+from dotenv import load_dotenv
+load_dotenv()
 
 # Make sure project root is on path when running from ui/
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -379,60 +381,9 @@ def render_app():
     )
 
     # ── CSS ───────────────────────────────────────────────────────────────────
-    st.markdown("""
-<style>
-/* ── General ── */
-.main .block-container { padding-top: 1.5rem; }
-h1 { font-size: 2rem !important; }
-
-/* ── Urgency badges ── */
-.badge {
-    display: inline-block;
-    padding: 4px 14px;
-    border-radius: 20px;
-    font-weight: 700;
-    font-size: 0.85rem;
-    letter-spacing: 0.05em;
-}
-.badge-low      { background:#d4edda; color:#155724; }
-.badge-medium   { background:#fff3cd; color:#856404; }
-.badge-high     { background:#ffe0b2; color:#b34800; }
-.badge-critical { background:#f8d7da; color:#721c24; }
-
-/* ── Route cards ── */
-.route-card {
-    border: 1px solid #dee2e6;
-    border-radius: 10px;
-    padding: 16px;
-    margin-bottom: 12px;
-    background: #ffffff;
-    color: #212529 !important;
-}
-.route-card-best {
-    border: 2px solid #0d6efd;
-    border-radius: 10px;
-    padding: 16px;
-    margin-bottom: 12px;
-    background: #f0f5ff;
-    color: #212529 !important;
-}
-.route-label {
-    font-size: 1.1rem;
-    font-weight: 700;
-    color: #212529 !important;
-    margin-bottom: 8px;
-}
-
-/* ── Metric text — inherit from Streamlit theme ── */
-[data-testid="stMetricValue"]  { font-size: 1.25rem !important; font-weight: 700 !important; }
-[data-testid="stMetricLabel"]  { font-size: 0.8rem !important; opacity: 0.75; }
-
-
-/* ── Chat ── */
-.chat-user  { background:#e9ecef; border-radius:12px 12px 2px 12px; padding:10px 14px; margin:6px 0; text-align:right; }
-.chat-agent { background:#f0f5ff; border-radius:12px 12px 12px 2px; padding:10px 14px; margin:6px 0; }
-</style>
-""", unsafe_allow_html=True)
+    _css_path = os.path.join(os.path.dirname(__file__), "styles.css")
+    with open(_css_path) as _f:
+        st.markdown(f"<style>{_f.read()}</style>", unsafe_allow_html=True)
 
     # ── Welcome bar ───────────────────────────────────────────────────────────
     user = get_current_user()
@@ -495,11 +446,12 @@ h1 { font-size: 2rem !important; }
         st.divider()
         st.markdown("### 📍 Quick Fill")
         def _quick_fill(origin: str, dest: str):
-            st.session_state["origin_input"]      = origin
-            st.session_state["destination_input"] = dest
-            # Clear searchbox internal state so they re-render with new defaults
-            st.session_state.pop("origin_searchbox", None)
-            st.session_state.pop("dest_searchbox", None)
+            st.session_state["prefill_origin"]      = origin
+            st.session_state["prefill_destination"] = dest
+            for key in ("origin_searchbox", "dest_searchbox",
+                        "origin_searchbox_options", "dest_searchbox_options"):
+                st.session_state.pop(key, None)
+            st.rerun()
 
         if st.button("🏠 Delhi: Rajiv Chowk → Cyber City", use_container_width=True):
             _quick_fill("Rajiv Chowk Metro Station, Delhi", "Cyber City, Gurugram")
@@ -523,12 +475,22 @@ h1 { font-size: 2rem !important; }
                     with col_btn:
                         if st.button(c["name"], key=f"saved_{c['id']}", use_container_width=True):
                             _quick_fill(c["origin"], c["destination"])
-                            st.rerun()
                     with col_del:
                         if st.button("✕", key=f"del_{c['id']}", help="Remove"):
-                            get_client().delete_saved_commute(c["id"])
+                            _del_session = supabase.auth.get_session()
+                            if _del_session and _del_session.access_token:
+                                get_client().delete_saved_commute(_del_session.access_token, c["id"])
                             st.rerun()
                 st.divider()
+
+        with st.expander("🧪 Dev tools", expanded=False):
+            if st.button("Reset alert cooldown", use_container_width=True):
+                st.session_state.pop("alerts_last_checked_at", None)
+                st.session_state.pop("pending_alerts", None)
+                st.session_state.pop("last_sms_sent_at", None)
+                st.rerun()
+            st.caption(f"Last check: {st.session_state.get('alerts_last_checked_at', 'never')}")
+            st.caption(f"Last SMS: {st.session_state.get('last_sms_sent_at', 'never')}")
 
         st.caption("Delhi Commute Agent · Powered by Gemini 2.5 Flash")
 
@@ -538,6 +500,38 @@ h1 { font-size: 2rem !important; }
     st.markdown("*AI-powered commute planning across Indian cities — real-time routes, weather, and smart timing*")
     st.divider()
 
+    # ── Proactive alerts — checked inline on each page load ──────────────────
+    _alert_user = get_current_user()
+    _last_check = st.session_state.get("alerts_last_checked_at")
+    _should_check = (
+        _last_check is None or
+        (datetime.now() - _last_check) > timedelta(minutes=15)
+    )
+    if _alert_user and _should_check:
+        try:
+            from services.memory_service import detect_patterns
+            from services.alert_service import _is_departure_window, generate_alerts
+            _history = get_client().get_trip_history(_alert_user.id)
+            _patterns = detect_patterns(_history)
+            if _patterns and _is_departure_window(_patterns.get("usual_departure_hour")):
+                _alerts = run_async(generate_alerts(_patterns))
+                st.session_state["pending_alerts"] = _alerts
+                from services.alert_service import send_sms_alerts
+                _last_sms = st.session_state.get("last_sms_sent_at")
+                if _alerts and (not _last_sms or (datetime.now() - _last_sms) > timedelta(hours=2)):
+                    send_sms_alerts(_alerts)
+                    st.session_state["last_sms_sent_at"] = datetime.now()
+            else:
+                st.session_state["pending_alerts"] = []
+            st.session_state["alerts_last_checked_at"] = datetime.now()
+        except Exception as e:
+            st.sidebar.error(f"Alert check error: {e}")  # CHANGE THIS LINE
+
+    for _alert in st.session_state.get("pending_alerts", []):
+        if _alert["severity"] == "warning":
+            st.warning(f"**Heads up for your usual commute:** {_alert['message']}  \n_{_alert['suggestion']}_")
+        else:
+            st.info(f"**Commute update:** {_alert['message']}  \n_{_alert['suggestion']}_")
 
     # ── TABS ──────────────────────────────────────────────────────────────────
     tab_plan, tab_commutes, tab_chat = st.tabs(["🗺️  Plan Commute", "📊  My Commutes", "💬  Chat with Agent"])
@@ -555,7 +549,7 @@ h1 { font-size: 2rem !important; }
             origin = st_searchbox(
                 search_places_autocomplete,
                 placeholder="Start typing your origin…",
-                default=st.session_state.get("origin_input", "Rajiv Chowk Metro Station, Delhi"),
+                default=st.session_state.get("prefill_origin", "Rajiv Chowk Metro Station, Delhi"),
                 key="origin_searchbox",
                 clear_on_submit=False,
             )
@@ -564,7 +558,7 @@ h1 { font-size: 2rem !important; }
             destination = st_searchbox(
                 search_places_autocomplete,
                 placeholder="Start typing your destination…",
-                default=st.session_state.get("destination_input", "Cyber City, Gurugram"),
+                default=st.session_state.get("prefill_destination", "Cyber City, Gurugram"),
                 key="dest_searchbox",
                 clear_on_submit=False,
             )
@@ -590,8 +584,8 @@ h1 { font-size: 2rem !important; }
         # ── Run agent on submit ───────────────────────────────────────────────
         if submitted:
             # st_searchbox returns None until user selects; fall back to session default
-            origin      = origin      or st.session_state.get("origin_input", "")
-            destination = destination or st.session_state.get("destination_input", "")
+            origin      = origin      or st.session_state.get("prefill_origin", "")
+            destination = destination or st.session_state.get("prefill_destination", "")
             if not (origin or "").strip() or not (destination or "").strip():
                 st.error("Please enter both origin and destination.")
             else:
@@ -671,6 +665,23 @@ h1 { font-size: 2rem !important; }
         # ── Display results ───────────────────────────────────────────────────
         if result := st.session_state.get("plan_result"):
             st.divider()
+
+            # ── Route preview card ────────────────────────────────────────────
+            _po = st.session_state.get("plan_origin", "")
+            _pd = st.session_state.get("plan_destination", "")
+            _o_html = _po if _po else '<span class="rp-text-muted">Unknown origin</span>'
+            _d_html = _pd if _pd else '<span class="rp-text-muted">Unknown destination</span>'
+            st.markdown(
+                f"""
+<div class="rp-wrap">
+  <div class="rp-card">
+    <div class="rp-endpoint"><span class="rp-dot rp-dot-o"></span><span class="rp-text">{_o_html}</span></div>
+    <div class="rp-arrow">→</div>
+    <div class="rp-endpoint"><span class="rp-dot rp-dot-d"></span><span class="rp-text">{_d_html}</span></div>
+  </div>
+</div>""",
+                unsafe_allow_html=True,
+            )
 
             # City detection banner
             detected_city = st.session_state.get("detected_city", "unknown")

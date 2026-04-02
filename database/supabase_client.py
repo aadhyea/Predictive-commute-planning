@@ -175,10 +175,10 @@ class SupabaseClient:
             logger.error(f"Failed to get saved commutes: {e}")
             return []
 
-    def delete_saved_commute(self, commute_id: str) -> bool:
+    def delete_saved_commute(self, access_token: str, commute_id: str) -> bool:
         """Delete a saved commute by its UUID."""
         try:
-            self.client.table("saved_commutes").delete().eq("id", commute_id).execute()
+            _authed_client(access_token).table("saved_commutes").delete().eq("id", commute_id).execute()
             return True
         except Exception as e:
             logger.error(f"Failed to delete saved commute: {e}")

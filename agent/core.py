@@ -29,6 +29,8 @@ from config import settings
 from agent.prompts import COMMUTE_AGENT_SYSTEM_PROMPT
 from agent.tools import GEMINI_TOOLS, execute_tool
 from maps.google_maps_client import maps_client
+from services.memory_service import detect_patterns
+from services.hybrid_route_service import hybrid_route_service
 
 logger = logging.getLogger(__name__)
 
@@ -106,8 +108,8 @@ class CommuteAgent:
         user_prefs    = user_prefs or {}
         departure_str = departure_time or datetime.now().isoformat()
 
-        # Geocode origin upfront so we can pass exact coordinates to get_weather.
-        # If geocoding fails we skip weather gracefully (no Delhi fallback).
+        # ── Geocode origin upfront ────────────────────────────────────────────
+        # Needed for get_weather coordinates; skip gracefully if it fails.
         origin_lat: Optional[float] = None
         origin_lng: Optional[float] = None
         try:
@@ -118,19 +120,65 @@ class CommuteAgent:
         except Exception as e:
             logger.warning(f"Could not geocode origin '{origin}' for weather: {e}")
 
+        # ── Pre-loop memory fetch (guests get an explicit early no-op) ────────
+        # We fetch history and run pattern detection before the Gemini loop so
+        # the singleton HybridRouteService has patterns ready when the model
+        # triggers get_route_options. The fetch is logged in tool_calls_made so
+        # the UI shows it as a visible agent step.
+        tool_calls_made: List[str] = []
+        tool_results_store: List[Dict] = []
+
+        patterns: Optional[Dict[str, Any]] = None
+        memory_context: str = ""
+
+        if user_id is None:
+            # Guest — no history lookup, no personalisation
+            pass
+        else:
+            patterns, history_result = await self._fetch_user_patterns(user_id)
+            tool_calls_made.append("get_user_history")
+            tool_results_store.append({"name": "get_user_history", "result": history_result})
+            memory_context = self._build_memory_context(patterns)
+
+            # Start proactive alert scheduler (non-blocking, guards against re-spawn)
+            from services.alert_service import start_alert_scheduler
+            if patterns:
+                start_alert_scheduler(patterns)
+
         user_message = self._build_user_message(
             origin, destination, required_arrival, departure_str, user_prefs, extra_context,
             user_id=user_id,
             origin_lat=origin_lat,
             origin_lng=origin_lng,
+            memory_context=memory_context,
         )
 
         contents: List[types.Content] = [
             types.Content(role="user", parts=[types.Part(text=user_message)])
         ]
-        tool_calls_made: List[str] = []
-        tool_results_store: List[Dict] = []   # raw dicts for result extraction
 
+        # Push patterns to the scoring singleton; always clear in finally.
+        hybrid_route_service.set_user_patterns(patterns)
+        try:
+            return await self._run_agent_loop(
+                contents=contents,
+                tool_calls_made=tool_calls_made,
+                tool_results_store=tool_results_store,
+                origin=origin,
+                destination=destination,
+            )
+        finally:
+            hybrid_route_service.set_user_patterns(None)
+
+    async def _run_agent_loop(
+        self,
+        contents: List[types.Content],
+        tool_calls_made: List[str],
+        tool_results_store: List[Dict],
+        origin: str,
+        destination: str,
+    ) -> "CommuteRecommendation":
+        """Inner agent loop — separated so the try/finally in plan_commute stays clean."""
         for round_num in range(MAX_TOOL_ROUNDS):
             response = self._client.models.generate_content(
                 model=MODEL,
@@ -268,6 +316,7 @@ class CommuteAgent:
         user_id: Optional[str] = None,
         origin_lat: Optional[float] = None,
         origin_lng: Optional[float] = None,
+        memory_context: str = "",
     ) -> str:
         lines = [
             f"Plan my commute from **{origin}** to **{destination}**.",
@@ -294,13 +343,84 @@ class CommuteAgent:
         if extra_context:
             lines.append(f"Additional context: {extra_context}")
 
-        if user_id:
-            lines.append(
-                f"\nUser ID: {user_id} — call get_user_history with this ID to personalise the recommendation."
-            )
+        if memory_context:
+            lines.append(f"\n{memory_context}")
 
         lines.append(
             "\nPlease check current weather, fetch route options, and give me a clear recommendation."
+        )
+        return "\n".join(lines)
+
+    async def _fetch_user_patterns(
+        self, user_id: str
+    ) -> tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
+        """
+        Fetch trip history for user_id, run pattern detection, and return
+        (patterns, raw_result_dict) for injection into tool_results_store.
+        Returns (None, empty_result) on any failure.
+        """
+        try:
+            from database.supabase_client import get_client
+            trips = get_client().get_trip_history(user_id, limit=20)
+            patterns = detect_patterns(trips)
+            result = {
+                "trips": trips,
+                "count": len(trips),
+                "has_history": len(trips) > 0,
+                "patterns": patterns,
+            }
+            logger.info(
+                f"User history fetched: {len(trips)} trips, "
+                f"preferred_mode={patterns.get('preferred_mode') if patterns else None}"
+            )
+            return patterns, result
+        except Exception as e:
+            logger.warning(f"Could not fetch user history for personalisation: {e}")
+            return None, {"trips": [], "count": 0, "has_history": False, "patterns": None}
+
+    @staticmethod
+    def _build_memory_context(patterns: Optional[Dict[str, Any]]) -> str:
+        """
+        Convert detected patterns into a concise natural-language block that
+        is injected into the initial user message before the Gemini loop.
+        Returns an empty string for guests or users with no history.
+        """
+        if patterns is None:
+            return ""
+
+        lines = ["User memory context (retrieved from trip history):"]
+
+        if patterns.get("preferred_mode"):
+            mode_label = {
+                "cab":          "cab (Ola/Uber)",
+                "metro_hybrid": "metro hybrid",
+                "transit":      "public transit",
+            }.get(patterns["preferred_mode"], patterns["preferred_mode"])
+            lines.append(f"  • Preferred transport mode: {mode_label}")
+
+        if patterns.get("usual_duration_min"):
+            lines.append(f"  • Typical trip duration: {patterns['usual_duration_min']} min")
+
+        if patterns.get("peak_cab_usage"):
+            lines.append("  • Often takes cabs during peak hours (use this when timing is tight)")
+
+        if patterns.get("avg_cost_by_mode"):
+            cost_parts = [
+                f"{m}: ₹{c}" for m, c in patterns["avg_cost_by_mode"].items()
+            ]
+            lines.append(f"  • Average spend — {', '.join(cost_parts)}")
+
+        if patterns.get("route_frequency"):
+            top = list(patterns["route_frequency"].items())[:2]
+            freq_str = "; ".join(f"{r} ({n}x)" for r, n in top)
+            lines.append(f"  • Most frequent routes: {freq_str}")
+
+        if not patterns.get("has_reliable_data"):
+            lines.append("  • (Limited history — treat patterns as preliminary)")
+
+        lines.append(
+            "Use these patterns to open your explanation with one personalised insight "
+            "and to inform your route recommendation."
         )
         return "\n".join(lines)
 

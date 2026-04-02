@@ -24,6 +24,7 @@ python-jose[cryptography]==3.3.0
 # APIs
 requests==2.31.0
 googlemaps==4.10.0
+twilio>=8.0.0
 
 # Data processing
 pandas==2.1.4
