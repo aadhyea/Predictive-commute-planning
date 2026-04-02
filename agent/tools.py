@@ -392,10 +392,19 @@ async def _get_comfort_advisory(inp: Dict) -> Dict:
     line = inp.get("metro_line", "Generic")
 
     dep_str = inp.get("departure_time_iso")
-    try:
-        departure = datetime.fromisoformat(dep_str) if dep_str else datetime.now()
-    except (ValueError, TypeError):
-        departure = datetime.now()
+    departure = datetime.now()
+    if dep_str:
+        try:
+            departure = datetime.fromisoformat(dep_str)
+        except (ValueError, TypeError):
+            # Handle time-only strings like "08:30" or "08:30:00"
+            # (result.leave_by is stored as HH:MM, not a full ISO datetime)
+            try:
+                from datetime import time as _time
+                t = _time.fromisoformat(dep_str.strip())
+                departure = datetime.combine(datetime.now().date(), t)
+            except (ValueError, TypeError):
+                departure = datetime.now()
 
     # --- Weather / heat index ---
     conditions = await weather_service.get_current_conditions(lat=lat, lon=lon)

@@ -145,16 +145,20 @@ class SupabaseClient:
     # ============================================
 
     def save_commute(
-        self, access_token: str, user_id: str, name: str, origin: str, destination: str
+        self, access_token: str, user_id: str, name: str, origin: str, destination: str,
+        mode: Optional[str] = None,
     ) -> bool:
         """Bookmark an origin/destination pair for quick replan."""
         try:
-            _authed_client(access_token).table("saved_commutes").insert({
+            row = {
                 "user_id":     user_id,
                 "name":        name,
                 "origin":      origin,
                 "destination": destination,
-            }).execute()
+            }
+            if mode:
+                row["mode"] = mode
+            _authed_client(access_token).table("saved_commutes").insert(row).execute()
             return True
         except Exception as e:
             logger.error(f"Failed to save commute: {e}")
