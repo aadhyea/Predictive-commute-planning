@@ -258,17 +258,11 @@ def _build_uber_link(origin: str, dest: str, o_geo=None, d_geo=None) -> str:
     return url
 
 
-def _build_uber_app_link(origin: str, dest: str, o_geo=None, d_geo=None) -> str:
-    """Native app-scheme link for QR code — opens Uber app directly."""
-    from urllib.parse import quote
-    url = "uber://?action=setPickup"
-    if o_geo:
-        url += f"&pickup[latitude]={o_geo['lat']}&pickup[longitude]={o_geo['lng']}"
-    url += f"&pickup[nickname]={quote(origin)}"
-    if d_geo:
-        url += f"&dropoff[latitude]={d_geo['lat']}&dropoff[longitude]={d_geo['lng']}"
-    url += f"&dropoff[nickname]={quote(dest)}"
-    return url
+def _build_uber_qr_link(origin: str, dest: str, o_geo=None, d_geo=None) -> str:
+    """Universal Link for Uber QR code — opens app if installed, mobile web otherwise."""
+    # Use the same https:// Universal Link as the button; the uber:// scheme fails
+    # silently when the app is not installed (iOS drops it entirely).
+    return _build_uber_link(origin, dest, o_geo, d_geo)
 
 
 def _build_ola_link(origin: str, dest: str, o_geo=None, d_geo=None) -> str:
@@ -495,20 +489,36 @@ h1 { font-size: 2rem !important; }
         st.divider()
         st.markdown("### 📍 Quick Fill")
         def _quick_fill(origin: str, dest: str):
+            import time as _time
             st.session_state["origin_input"]      = origin
             st.session_state["destination_input"] = dest
-            # Clear searchbox internal state so they re-render with new defaults
-            st.session_state.pop("origin_searchbox", None)
-            st.session_state.pop("dest_searchbox", None)
+            # _origin_fill / _dest_fill drive default_searchterm in the st_searchbox
+            # calls below — that prop is what React actually shows in the input on mount.
+            st.session_state["_origin_fill"] = origin
+            st.session_state["_dest_fill"]   = dest
+            # Changing key_react forces React to remount, picking up default_searchterm.
+            _t = _time.time()
+            st.session_state["origin_searchbox"] = {
+                "result": origin, "search": origin,
+                "options_js": [], "key_react": f"origin_searchbox_react_{_t}",
+            }
+            st.session_state["dest_searchbox"] = {
+                "result": dest, "search": dest,
+                "options_js": [], "key_react": f"dest_searchbox_react_{_t}",
+            }
 
         if st.button("🏠 Delhi: Rajiv Chowk → Cyber City", use_container_width=True):
             _quick_fill("Rajiv Chowk Metro Station, Delhi", "Cyber City, Gurugram")
+            st.rerun()
         if st.button("📍 Delhi: CP → Noida Sector 62", use_container_width=True):
             _quick_fill("Connaught Place, New Delhi", "Noida Sector 62, Uttar Pradesh")
+            st.rerun()
         if st.button("✈️ Bangalore: Indiranagar → Whitefield", use_container_width=True):
             _quick_fill("Indiranagar, Bengaluru", "Whitefield, Bengaluru")
+            st.rerun()
         if st.button("🌊 Mumbai: Andheri → Bandra Kurla Complex", use_container_width=True):
             _quick_fill("Andheri Station, Mumbai", "Bandra Kurla Complex, Mumbai")
+            st.rerun()
 
         st.divider()
         st.markdown("### 🌐 Language")
@@ -569,6 +579,7 @@ h1 { font-size: 2rem !important; }
                 search_places_autocomplete,
                 placeholder="Start typing your origin…",
                 default=st.session_state.get("origin_input", "Rajiv Chowk Metro Station, Delhi"),
+                default_searchterm=st.session_state.get("_origin_fill", ""),
                 key="origin_searchbox",
                 clear_on_submit=False,
             )
@@ -578,6 +589,7 @@ h1 { font-size: 2rem !important; }
                 search_places_autocomplete,
                 placeholder="Start typing your destination…",
                 default=st.session_state.get("destination_input", "Cyber City, Gurugram"),
+                default_searchterm=st.session_state.get("_dest_fill", ""),
                 key="dest_searchbox",
                 clear_on_submit=False,
             )
@@ -907,20 +919,25 @@ h1 { font-size: 2rem !important; }
                             with uber_col:
                                 st.link_button("Open in Uber 🟡", uber_url, use_container_width=True)
                                 try:
-                                    uber_app_url = _build_uber_app_link(origin_txt, dest_txt, o_geo, d_geo)
-                                    st.image(_url_to_qr_bytes(uber_app_url), width=120,
-                                             caption="Scan to open Uber app")
+                                    uber_qr_url = _build_uber_qr_link(origin_txt, dest_txt, o_geo, d_geo)
+                                    st.image(_url_to_qr_bytes(uber_qr_url), width=120,
+                                             caption="Scan → opens Uber with route pre-filled")
                                 except Exception:
                                     pass
                             with ola_col:
                                 st.link_button("Open in Ola 🟢", ola_url, use_container_width=True)
                                 try:
                                     st.image(_url_to_qr_bytes(ola_url), width=120,
-                                             caption="Scan to open Ola app")
+                                             caption="Scan → opens Ola booking page")
                                 except Exception:
                                     pass
                             with note_col:
-                                st.caption("📱 Scan the QR code with your phone to open the app with source & destination pre-filled.")
+                                st.info(
+                                    "**Pickup & drop are pre-filled with coordinates.**  \n"
+                                    "If the app asks to confirm your pickup location, "
+                                    "tap **Confirm** — your address is already shown on the map.",
+                                    icon="📍",
+                                )
             else:
                 st.info("No route data returned — see agent explanation above.")
 
