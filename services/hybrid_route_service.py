@@ -235,12 +235,17 @@ class HybridRouteService:
             if hybrid:
                 options.append(hybrid)
 
-        # Score & rank (with heat + crowding comfort penalties)
-        options = self._score_and_rank(
-            options, user_prefs, prefer_metro, required_arrival, departure_time,
-            heat_category=heat_category,
-            user_patterns=self._user_patterns,
-        )
+        # Score & rank — or skip and let Gemini reason about the ranking
+        if settings.LLM_SCORING_ENABLED:
+            # Return options in build order (transit → cab → metro hybrid).
+            # Gemini will receive them with raw metrics and decide the ranking.
+            pass
+        else:
+            options = self._score_and_rank(
+                options, user_prefs, prefer_metro, required_arrival, departure_time,
+                heat_category=heat_category,
+                user_patterns=self._user_patterns,
+            )
 
         # Trim to configured max
         return options[:settings.MAX_ROUTES_TO_COMPARE]
