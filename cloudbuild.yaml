@@ -1,0 +1,12 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'asia-south1-docker.pkg.dev/project-7f27c152-10b0-40ae-ac6/cloud-run-source-deploy/commute-app:$COMMIT_SHA', '.']
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'asia-south1-docker.pkg.dev/project-7f27c152-10b0-40ae-ac6/cloud-run-source-deploy/commute-app:$COMMIT_SHA']
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args: ['run', 'services', 'update', 'predictive-commute-planning',
+           '--image=asia-south1-docker.pkg.dev/project-7f27c152-10b0-40ae-ac6/cloud-run-source-deploy/commute-app:$COMMIT_SHA',
+           '--region=asia-south1']
+options:
+  logging: CLOUD_LOGGING_ONLY
