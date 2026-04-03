@@ -174,6 +174,15 @@ class Settings(BaseSettings):
         True,
         description="Enable Metro+Cab hybrid routes"
     )
+    LLM_SCORING_ENABLED: bool = Field(
+        False,
+        description=(
+            "When True, route options are passed to Gemini unranked and the LLM "
+            "reasons about the best choice based on today's context (weather, time "
+            "pressure, user patterns). When False, Python weights are used. "
+            "Set to True in .env to enable LLM-powered ranking."
+        ),
+    )
     
     class Config:
         env_file = str(PROJECT_ROOT / ".env")

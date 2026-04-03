@@ -503,6 +503,22 @@ class CommuteAgent:
                 if ci.get("delay_risk", 0) > risk_score:
                     risk_score = ci["delay_risk"]
 
+        # ── LLM scoring: reorder routes to match Gemini's stated recommendation ──
+        # Gemini is instructed to start its response with "BEST_ROUTE: <route_id>".
+        # Parse that tag, promote the matching route to position 0, then strip the
+        # tag line from the explanation so the UI never shows it.
+        from config import settings
+        if settings.LLM_SCORING_ENABLED and len(routes) > 1:
+            first_line, _, rest = explanation.partition("\n")
+            if first_line.strip().upper().startswith("BEST_ROUTE:"):
+                best_id = first_line.split(":", 1)[1].strip()
+                explanation = rest.strip()   # remove the tag line from visible text
+                for i, route in enumerate(routes):
+                    if route.get("route_id") == best_id:
+                        if i != 0:
+                            routes = [routes[i]] + routes[:i] + routes[i + 1:]
+                        break
+
         disruptions = []
         for r in routes:
             disruptions.extend(r.get("disruptions", []))
@@ -582,7 +598,14 @@ def _summarise_tool_result(name: str, result: Dict[str, Any]) -> str:
         return f"risk: {risk} ({cond})"
 
     if name == "get_route_options":
+        from config import settings
         n = result.get("num_options", 0)
+        if settings.LLM_SCORING_ENABLED:
+            ctx = result.get("ranking_context", {})
+            peak_flag = "peak" if ctx.get("is_peak_hour") else "off-peak"
+            buf = ctx.get("buffer_minutes")
+            buf_str = f", {buf}min buffer" if buf is not None else ""
+            return f"{n} options — Gemini ranking ({peak_flag}{buf_str})"
         return f"{n} options scored"
 
     if name == "get_comfort_advisory":

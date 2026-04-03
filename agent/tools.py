@@ -52,10 +52,12 @@ GEMINI_TOOLS = [
         types.FunctionDeclaration(
             name="get_route_options",
             description=(
-                "Fetch ranked route options between an origin and destination. "
+                "Fetch route options between an origin and destination. "
                 "Returns up to 3 options: transit (Google Maps), cab (estimated), "
                 "and metro hybrid (walk + metro + walk). Each includes duration, cost, "
-                "on-time probability, and step-by-step breakdown."
+                "on-time probability, and step-by-step breakdown. "
+                "When ranking_required is True in the response, YOU must rank the routes "
+                "and explain which factor drove your choice today."
             ),
             parameters=S(
                 type=T.OBJECT,
@@ -269,6 +271,8 @@ async def _get_weather(inp: Dict) -> Dict:
 
 
 async def _get_route_options(inp: Dict) -> Dict:
+    from config import settings
+
     departure = None
     required  = None
 
@@ -292,9 +296,56 @@ async def _get_route_options(inp: Dict) -> Dict:
         city_override=    inp.get("city"),
     )
 
+    if not settings.LLM_SCORING_ENABLED:
+        return {
+            "num_options": len(options),
+            "options":     [o.to_dict() for o in options],
+        }
+
+    # ── LLM scoring mode ─────────────────────────────────────────────────────
+    # Strip the pre-computed score so Gemini doesn't anchor on a Python number.
+    # Include a ranking_context block with the factors that should drive the choice.
+    route_dicts = []
+    for o in options:
+        d = o.to_dict()
+        d.pop("score", None)   # Gemini decides the ranking, not Python weights
+        route_dicts.append(d)
+
+    # Build context from what we know at this point
+    departure_dt  = departure or datetime.now()
+    is_peak       = hybrid_route_service._is_peak(departure_dt)
+    patterns      = hybrid_route_service._user_patterns  # set by core.py before loop
+
+    ranking_context: Dict[str, Any] = {
+        "is_peak_hour":         is_peak,
+        "has_required_arrival": required is not None,
+    }
+    if required and departure:
+        buffer_min = (required - departure_dt).total_seconds() / 60
+        ranking_context["buffer_minutes"] = round(buffer_min)
+    if patterns:
+        ranking_context["user_preferred_mode"]   = patterns.get("preferred_mode")
+        ranking_context["user_peak_cab_pattern"] = patterns.get("peak_cab_usage", False)
+        if patterns.get("avg_cost_by_mode"):
+            ranking_context["user_avg_cost_by_mode"] = patterns["avg_cost_by_mode"]
+
     return {
-        "num_options": len(options),
-        "options":     [o.to_dict() for o in options],
+        "num_options":        len(options),
+        "options":            route_dicts,
+        "ranking_required":   True,
+        "ranking_context":    ranking_context,
+        "ranking_instruction": (
+            "These routes are NOT pre-ranked. You must decide the best order. "
+            "IMPORTANT: Start your entire response with exactly this line (nothing before it):\n"
+            "BEST_ROUTE: <route_id>\n"
+            "where <route_id> is the route_id field of the option you recommend. "
+            "Then write your SUMMARY and REASONING as normal. "
+            "In your SUMMARY, name the route you recommend AND state the single most "
+            "important factor that drove your choice TODAY — be specific about the "
+            "tradeoff (e.g. 'prioritising cost over the 7-min time difference because "
+            "weather is clear and buffer is comfortable' or 'choosing cab despite higher "
+            "cost because the 5-min buffer leaves no room for metro delays')."
+        ),
     }
 
 
