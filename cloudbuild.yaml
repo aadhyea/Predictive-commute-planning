@@ -8,5 +8,7 @@ steps:
     args: ['run', 'services', 'update', 'predictive-commute-planning',
            '--image=asia-south1-docker.pkg.dev/project-7f27c152-10b0-40ae-ac6/cloud-run-source-deploy/commute-app:$COMMIT_SHA',
            '--region=asia-south1']
+
+logsBucket: 'gs://commute-build-logs-833412167190'
 options:
-  logging: CLOUD_LOGGING_ONLY
+  logging: GCS_ONLY
