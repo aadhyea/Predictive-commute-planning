@@ -3,17 +3,16 @@ python-dotenv==1.0.0
 pydantic==2.5.0
 pydantic-settings==2.1.0
 
-# Agent framework
-anthropic==0.18.1
+
 google-genai>=1.0.0
 langchain==0.1.20
 langgraph==0.0.40
 
-# HTTP client for MCP (using httpx for async support)
-httpx==0.26.0
+anthropic>=0.18.1
+httpx==0.25.2
+supabase>=2.3.4
 
-# Database (Supabase)
-supabase==2.3.4
+
 psycopg2-binary==2.9.9
 pgvector==0.2.4
 
